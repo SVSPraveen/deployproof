@@ -65,4 +65,6 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 ## Author
 
-SVS Praveen — [github.com/SVSPraveen](https://github.com/SVSPraveen)
+SVS Praveen — [github.com/SVSPraveen](https://github.com/SVSPraveen)  
+Portfolio: https://svspraveen.vercel.app/  
+LinkedIn: https://www.linkedin.com/in/svs-praveen-s/
