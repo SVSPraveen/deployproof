@@ -3,6 +3,7 @@
 import ast
 import copy
 import os
+import re
 import subprocess
 import sys
 import time
@@ -163,10 +164,8 @@ class MutationCounter(ast.NodeVisitor):
         self.count = 0
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        # Visit decorators
         for d in node.decorator_list:
             self.visit(d)
-        # Visit default parameter values (runtime expressions), but skip type annotations
         for default in node.args.defaults:
             if default:
                 self.visit(default)
@@ -190,13 +189,11 @@ class MutationCounter(ast.NodeVisitor):
             self.visit(stmt)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        # Visit target and value (if present), but skip annotation
         self.visit(node.target)
         if node.value:
             self.visit(node.value)
 
     def visit_arg(self, node: ast.arg) -> None:
-        # Deliberately skip node.annotation
         pass
 
     def visit_Compare(self, node: ast.Compare) -> None:
@@ -239,7 +236,6 @@ class MutationTransformer(ast.NodeTransformer):
         node.decorator_list = [self.visit(d) for d in node.decorator_list]
         node.args.defaults = [self.visit(d) if d else None for d in node.args.defaults]
         node.args.kw_defaults = [self.visit(d) if d else None for d in node.args.kw_defaults]
-        # node.returns and arg.annotation are deliberately NOT visited
         node.body = [self.visit(stmt) for stmt in node.body]
         return node
 
@@ -346,6 +342,35 @@ class MutationTransformer(ast.NodeTransformer):
                 )
             self.current_index += 1
         return node
+
+
+def parse_pytest_summary(output: str) -> Dict[str, Any]:
+    """
+    Parse pytest stdout/stderr to inspect whether any tests actually executed.
+    
+    Returns a dict with test counts and boolean no_tests_ran.
+    """
+    lowered = output.lower()
+    if "no tests ran" in lowered or "no test was collected" in lowered or "0 selected" in lowered:
+        return {"passed": 0, "failed": 0, "errors": 0, "total": 0, "no_tests_ran": True}
+
+    passed_m = re.search(r"(\d+)\s+passed", output)
+    failed_m = re.search(r"(\d+)\s+failed", output)
+    errors_m = re.search(r"(\d+)\s+error", output)
+
+    passed = int(passed_m.group(1)) if passed_m else 0
+    failed = int(failed_m.group(1)) if failed_m else 0
+    errors = int(errors_m.group(1)) if errors_m else 0
+    total = passed + failed
+
+    no_tests = (total == 0 and errors == 0)
+    return {
+        "passed": passed,
+        "failed": failed,
+        "errors": errors,
+        "total": total,
+        "no_tests_ran": no_tests,
+    }
 
 
 def collect_skipped_constructs_for_file(file_path: Path) -> List[SkippedConstruct]:
@@ -472,8 +497,11 @@ def run_mutation_tests(
     if extra_pytest_args:
         pytest_cmd.extend(extra_pytest_args)
 
-    # Baseline sanity check
+    # 1. Baseline pre-flight check
+    baseline_has_no_tests = False
+    baseline_duration = 1.0
     try:
+        t0 = time.time()
         baseline_res = subprocess.run(
             pytest_cmd,
             cwd=root,
@@ -482,13 +510,18 @@ def run_mutation_tests(
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=test_runner_timeout * 2,
+            timeout=max(test_runner_timeout * 2, 20.0),
         )
-        if baseline_res.returncode == 5:
+        baseline_duration = max(time.time() - t0, 0.5)
+        combined_output = baseline_res.stdout + "\n" + baseline_res.stderr
+        summary = parse_pytest_summary(combined_output)
+
+        if baseline_res.returncode == 5 or summary["no_tests_ran"]:
             # Baseline collected 0 tests
+            baseline_has_no_tests = True
             untested_files_set.update(target_files)
-        elif baseline_res.returncode != 0:
-            err_output = (baseline_res.stderr + "\n" + baseline_res.stdout).strip()
+        elif baseline_res.returncode in (2, 3, 4) or summary["errors"] > 0:
+            err_output = combined_output.strip()
             if "ModuleNotFoundError" in err_output or "ImportError" in err_output:
                 print(
                     "\n[!] Test suite failed to run before mutations (ModuleNotFoundError / ImportError).\n"
@@ -498,6 +531,28 @@ def run_mutation_tests(
     except Exception:
         pass
 
+    # Dynamic timeout scaled to environment baseline speed
+    effective_timeout = max(test_runner_timeout, baseline_duration * 3.0 + 5.0)
+
+    # If baseline has NO tests at all, all mutants automatically survive without slow subprocesses
+    if baseline_has_no_tests:
+        for mutant in all_mutants:
+            mutant.status = "SURVIVED"
+            survived.append(mutant)
+
+        return MutationResult(
+            total_mutants=len(all_mutants),
+            killed_mutants=0,
+            survived_mutants=survived,
+            untested_files=sorted(untested_files_set),
+            runner_errors=[],
+            skipped_constructs=all_skipped,
+            mutation_score=0.0,
+            duration_seconds=round(time.time() - start_time, 2),
+            files_tested=target_files,
+        )
+
+    # 2. Execute test runner for each mutant
     for mutant in all_mutants:
         original_code = mutant.file_path.read_text(encoding="utf-8", errors="replace")
         try:
@@ -513,34 +568,38 @@ def run_mutation_tests(
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=test_runner_timeout,
+                timeout=effective_timeout,
             )
 
-            # Precise pytest exit code classification:
-            # Code 1: Tests ran and failed -> Mutant KILLED
-            # Code 0: Tests ran and passed -> Mutant SURVIVED (missed by tests)
-            # Code 5: NO_TESTS_COLLECTED -> Mutant SURVIVED (0 tests found)
-            # Code 2, 3, 4: Runner error -> RUNNER_ERROR
-            if res.returncode == 1:
-                mutant.status = "KILLED"
-                killed_count += 1
-            elif res.returncode == 0:
-                mutant.status = "SURVIVED"
-                survived.append(mutant)
-            elif res.returncode == 5:
+            combined_out = res.stdout + "\n" + res.stderr
+            summary = parse_pytest_summary(combined_out)
+
+            # Precise pytest output and exit code classification:
+            if res.returncode == 5 or summary["no_tests_ran"]:
+                # Zero tests ran -> mutant survived untested
                 mutant.status = "SURVIVED"
                 survived.append(mutant)
                 untested_files_set.add(mutant.file_path)
-            elif res.returncode in (2, 3, 4):
+            elif summary["failed"] > 0 or res.returncode == 1:
+                # Tests executed and failed -> mutant caught
+                mutant.status = "KILLED"
+                killed_count += 1
+            elif res.returncode == 0 and summary["passed"] > 0:
+                # Tests executed and passed -> mutant survived undetected
+                mutant.status = "SURVIVED"
+                survived.append(mutant)
+            elif res.returncode in (2, 3, 4) or summary["errors"] > 0:
+                # Syntax / usage / runner collection error
                 mutant.status = "RUNNER_ERROR"
                 err_msg = f"Pytest exit code {res.returncode}: {res.stderr.strip() or res.stdout.strip()}"
                 runner_errors.append((mutant, err_msg))
             else:
+                # Default fallback
                 mutant.status = "SURVIVED"
                 survived.append(mutant)
 
         except subprocess.TimeoutExpired:
-            # Timeout caused by mutant -> KILLED
+            # Timeout on a mutant when baseline had working tests -> KILLED (infinite loop)
             mutant.status = "KILLED"
             killed_count += 1
         except Exception as e:
