@@ -72,7 +72,7 @@ def test_dangling_symlink_escape_detection():
 
         finding = inspect_symlink(
             symlink_path=decoy_symlink,
-            raw_target="../../etc/shadow",
+            raw_target="../../nonexistent_external_file_xyz_123.bin",
             repo_root=root,
         )
 
