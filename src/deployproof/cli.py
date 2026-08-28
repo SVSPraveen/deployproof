@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import List, Optional
 
 from deployproof import __version__
+from deployproof.dependencies import (
+    extract_all_new_dependencies,
+    scan_dependencies,
+)
 from deployproof.diff import (
     DiffScopeError,
     InvalidBaseRefError,
@@ -99,9 +103,12 @@ def handle_check(args: argparse.Namespace) -> int:
     try:
         if args.files:
             session_files = [Path(f).resolve() for f in args.files]
-            try:
-                repo_root = get_git_root(cwd)
-            except DiffScopeError:
+            if session_files:
+                try:
+                    repo_root = get_git_root(session_files[0].parent)
+                except DiffScopeError:
+                    repo_root = session_files[0].parent
+            else:
                 repo_root = cwd
         else:
             repo_root = get_git_root(cwd)
@@ -127,7 +134,11 @@ def handle_check(args: argparse.Namespace) -> int:
     # 2. Run Secrets & Credentials Scanner across all session files
     secrets_result = scan_session_files_for_secrets(session_files)
 
-    # 3. Filter target Python files for mutation testing
+    # 3. Run Slopsquatting & Dependency Hallucination Scanner across session files
+    extracted_deps = extract_all_new_dependencies(session_files, root=repo_root or cwd, base=args.base)
+    dependency_result = scan_dependencies(extracted_deps)
+
+    # 4. Filter target Python files for mutation testing
     if args.files:
         target_files = [f for f in session_files if f.is_file() and f.suffix == ".py"]
     else:
@@ -143,7 +154,7 @@ def handle_check(args: argparse.Namespace) -> int:
                 except ValueError:
                     rel = f
                 print(
-                    f"Notice: Large file '{rel}' ({loc} LOC) detected — mutation testing may take several minutes. Parallelization not yet implemented."
+                    f"Notice: Large file '{rel}' ({loc} LOC) detected - mutation testing may take several minutes."
                 )
         except Exception:
             pass
@@ -152,11 +163,15 @@ def handle_check(args: argparse.Namespace) -> int:
     if getattr(args, "wsl", False):
         wsl_ready, wsl_msg = check_wsl_readiness()
         if wsl_ready:
-            print("DeployProof — Delegating to mutmut in WSL...")
+            print("DeployProof - Delegating to mutmut in WSL...")
             wsl_res = run_wsl_mutmut(repo_root or cwd, target_files)
             if wsl_res.get("success"):
                 print(wsl_res.get("stdout", ""))
-                has_security_issue = bool(secrets_result.findings or symlink_result.escape_findings)
+                has_security_issue = bool(
+                    secrets_result.findings
+                    or symlink_result.escape_findings
+                    or dependency_result.high_risk_count > 0
+                )
                 return 1 if has_security_issue else 0
             else:
                 print(f"WSL execution error: {wsl_res.get('error') or wsl_res.get('stderr')}", file=sys.stderr)
@@ -177,16 +192,19 @@ def handle_check(args: argparse.Namespace) -> int:
         target_files=target_files,
         secrets_result=secrets_result,
         symlink_result=symlink_result,
+        dependency_result=dependency_result,
         repo_root=repo_root or cwd,
         threshold=args.threshold,
     )
     print(report_text)
 
-    # Fail if mutation score threshold not met, secrets detected, or symlink sandbox escapes found
+    # Fail if mutation score threshold not met, secrets detected, symlink sandbox escapes found, or hallucinated packages detected
     if (
         result.mutation_score < args.threshold
+        or len(result.untested_files) > 0
         or len(secrets_result.findings) > 0
         or len(symlink_result.escape_findings) > 0
+        or dependency_result.high_risk_count > 0
     ):
         return 1
     return 0
@@ -194,6 +212,17 @@ def handle_check(args: argparse.Namespace) -> int:
 
 def main(argv: Optional[List[str]] = None) -> int:
     """Entry point for the DeployProof CLI."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(errors="replace")
+        except Exception:
+            pass
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(errors="replace")
+        except Exception:
+            pass
+
     parser = create_parser()
     args = parser.parse_args(argv)
 

@@ -2,6 +2,8 @@
 
 from pathlib import Path
 from typing import List, Optional
+
+from deployproof.dependencies import DependencyScanSummary
 from deployproof.mutator import MutationResult
 from deployproof.secrets import SecretsScanResult
 from deployproof.symlinks import SymlinkScanResult
@@ -14,12 +16,13 @@ def format_report(
     target_files: List[Path],
     secrets_result: Optional[SecretsScanResult] = None,
     symlink_result: Optional[SymlinkScanResult] = None,
+    dependency_result: Optional[DependencyScanSummary] = None,
     repo_root: Optional[Path] = None,
     threshold: float = 80.0,
 ) -> str:
-    """Format mutation testing results, secrets scan, and symlink escape checks as terminal output."""
+    """Format mutation testing results, secrets scan, symlink escape, and slopsquatting checks as terminal output."""
     lines: List[str] = []
-    lines.append("DeployProof — LOCAL PRE-CHECK (approximate) — not the verified score")
+    lines.append("DeployProof - LOCAL PRE-CHECK (approximate) - not the verified score")
     lines.append("=" * 68)
 
     root = (repo_root or Path.cwd()).resolve()
@@ -40,10 +43,10 @@ def format_report(
 
             if loc >= LARGE_FILE_LOC_THRESHOLD:
                 lines.append(
-                    f"  • {rel} ({loc} LOC) — [!] Large file: pre-check may take several minutes. Parallelization not yet implemented."
+                    f"  * {rel} ({loc} LOC) - [!] Large file: pre-check may take several minutes."
                 )
             else:
-                lines.append(f"  • {rel}")
+                lines.append(f"  * {rel}")
     else:
         lines.append("  (No modified Python files in scope)")
 
@@ -98,6 +101,56 @@ def format_report(
             f"  Clean: No hardcoded secrets or tracked .env files detected across {scanned_count} session file{'s' if scanned_count != 1 else ''}."
         )
 
+    # Dependency & Slopsquatting Scan section
+    lines.append("\nDependency & Slopsquatting Scan (PyPI Registry & Age Analysis):")
+    if dependency_result and (dependency_result.high_risk_count > 0 or dependency_result.medium_risk_count > 0):
+        flagged_count = dependency_result.high_risk_count + dependency_result.medium_risk_count
+        lines.append(
+            f"  [!] {flagged_count} suspicious dependency finding{'s' if flagged_count != 1 else ''} detected:"
+        )
+        idx = 1
+        for finding in dependency_result.findings:
+            if finding.status in ("HIGH_RISK", "MEDIUM_RISK"):
+                try:
+                    rel_src = finding.source_file.relative_to(root)
+                except ValueError:
+                    rel_src = finding.source_file
+                src_str = f"{rel_src}:{finding.lineno}" if finding.lineno else str(rel_src)
+                lines.append(f"\n    [{idx}] {finding.package_name} [{finding.status}]")
+                lines.append(f"        Source:         {src_str} ({finding.source_type})")
+                if finding.status == "HIGH_RISK":
+                    lines.append("        Classification: HIGH RISK (Package does NOT exist on PyPI)")
+                elif finding.status == "MEDIUM_RISK":
+                    lines.append(
+                        f"        Classification: MEDIUM RISK (Registered {finding.age_days} day{'s' if finding.age_days != 1 else ''} ago, first published {finding.first_release_date})"
+                    )
+                lines.append(f"        Note:           {finding.details}")
+                idx += 1
+
+    elif dependency_result and dependency_result.total_scanned > 0:
+        lines.append(
+            f"  Clean: {dependency_result.ok_count} external package{'s' if dependency_result.ok_count != 1 else ''} verified on PyPI (0 hallucinated, 0 recently registered)."
+        )
+    else:
+        scanned_count = secrets_result.files_scanned if secrets_result else file_count
+        lines.append(
+            f"  Clean: No new external packages introduced across {scanned_count} session file{'s' if scanned_count != 1 else ''}."
+        )
+
+    # UNKNOWN findings (network/registry query errors)
+    if dependency_result and dependency_result.unknown_count > 0:
+        lines.append(
+            f"\n  [?] {dependency_result.unknown_count} unverified dependency check{'s' if dependency_result.unknown_count != 1 else ''} (Network / registry query error):"
+        )
+        for finding in dependency_result.findings:
+            if finding.status == "UNKNOWN":
+                try:
+                    rel_src = finding.source_file.relative_to(root)
+                except ValueError:
+                    rel_src = finding.source_file
+                src_str = f"{rel_src}:{finding.lineno}" if finding.lineno else str(rel_src)
+                lines.append(f"    * {finding.package_name} (Source: {src_str}) - {finding.details}")
+
     # Score section
     lines.append("\nLocal Pre-Check Mutation Verification:")
     if result.total_mutants == 0:
@@ -106,8 +159,10 @@ def format_report(
     else:
         if result.untested_files:
             status_tag = f"FAILED (0 tests collected for {len(result.untested_files)} file{'s' if len(result.untested_files) != 1 else ''})"
+        elif result.mutation_score < threshold:
+            status_tag = f"FAILED (score {result.mutation_score:.1f}% below {threshold:.1f}%)"
         elif result.survived_mutants:
-            status_tag = "FAILED"
+            status_tag = f"PASSED (with {len(result.survived_mutants)} surviving mutant{'s' if len(result.survived_mutants) != 1 else ''})"
         elif result.skipped_constructs:
             status_tag = f"PARTIALLY VERIFIED ({len(result.skipped_constructs)} construct{'s' if len(result.skipped_constructs) != 1 else ''} skipped)"
         else:
@@ -129,7 +184,7 @@ def format_report(
                 rel_f = f.relative_to(root)
             except ValueError:
                 rel_f = f
-            lines.append(f"  • {rel_f} (0 tests ran against this file — all mutations survived)")
+            lines.append(f"  * {rel_f} (0 tests ran against this file - all mutations survived)")
 
     # Runner errors section
     if result.runner_errors:
@@ -141,20 +196,20 @@ def format_report(
                 rel_f = mutant.file_path.relative_to(root)
             except ValueError:
                 rel_f = mutant.file_path
-            lines.append(f"  • {rel_f}:{mutant.line_number} [{err_msg}]")
+            lines.append(f"  * {rel_f}:{mutant.line_number} [{err_msg}]")
 
     # Skipped Constructs Section (Always shown alongside score)
     skipped_count = len(result.skipped_constructs)
     if result.skipped_constructs:
         lines.append(
-            f"\nSkipped Constructs ({skipped_count} line{'s' if skipped_count != 1 else ''} skipped — not verified by Tier 1):"
+            f"\nSkipped Constructs ({skipped_count} line{'s' if skipped_count != 1 else ''} skipped - not verified by Tier 1):"
         )
         for i, s in enumerate(result.skipped_constructs, 1):
             try:
                 rel_f = s.file_path.relative_to(root)
             except ValueError:
                 rel_f = s.file_path
-            lines.append(f"  • {rel_f}:{s.line_number} [{s.construct_name}]")
+            lines.append(f"  * {rel_f}:{s.line_number} [{s.construct_name}]")
             if s.snippet:
                 lines.append(f"    Code: {s.snippet}")
             lines.append(f"    Note: {s.description}")
@@ -186,13 +241,21 @@ def format_report(
         lines.append(
             f"SECURITY ALERT: {len(symlink_result.escape_findings)} symlink(s) escape repository sandbox. Do not approve or push."
         )
+    elif dependency_result and dependency_result.high_risk_count > 0:
+        lines.append(
+            f"SECURITY ALERT: {dependency_result.high_risk_count} non-existent / hallucinated package(s) detected. Fix imports before pushing."
+        )
     elif result.untested_files:
         lines.append(
             f"Pre-check FAILED: {len(result.untested_files)} file(s) have 0 tests. Write tests for these files before pushing."
         )
+    elif result.mutation_score < threshold:
+        lines.append(
+            f"Pre-check FAILED: Score {result.mutation_score:.1f}% is below threshold {threshold:.1f}% ({len(result.survived_mutants)} surviving mutants)."
+        )
     elif result.survived_mutants:
         lines.append(
-            f"Pre-check flagged {len(result.survived_mutants)} surviving mutant(s). Write tests covering these lines before pushing."
+            f"Pre-check PASSED ({result.mutation_score:.1f}% >= {threshold:.1f}%), with {len(result.survived_mutants)} surviving mutant(s) flagged."
         )
     elif result.skipped_constructs:
         lines.append(
