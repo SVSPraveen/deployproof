@@ -10,9 +10,10 @@ AI-assisted development generates code faster than developers can review it, cre
 
 ## What It Checks
 
-- **Mutation Score (not coverage)**: Mutates session AST operators (`>=`, `==`, `and`, `or`, `*`) to test whether your test suite actually catches broken logic.
-- **Secrets and Credentials Scanner**: Intercepts hardcoded API keys (OpenAI, AWS, GitHub, Stripe, private keys) and tracked `.env` files across all session files before push.
+- **Mutation Score (not coverage)**: Mutates session AST operators (`>=`, `==`, `and`, `or`, `*`, numeric constants, comparisons) to test whether your test suite actually catches broken logic.
+- **Secrets and Credentials Scanner**: Intercepts hardcoded API keys (OpenAI, Anthropic, AWS, GitHub, Stripe, private keys) and tracked `.env` files across all session files before push.
 - **Symlink and Sandbox-Escape Prevention**: Detects symbolic links whose resolved target escapes the repository root directory (CWE-61 / CWE-451).
+- **Dependency and Slopsquatting Scanner**: Diff-scoped PyPI registry queries and registration-age analysis to catch hallucinated package names (404s) and suspicious newly-registered packages (<30 days).
 
 ## Quickstart
 
@@ -34,8 +35,6 @@ Run verification checks against current session changes:
 deployproof check
 ```
 
-> **Performance Note**: For files exceeding ~300 LOC, local mutation pre-checks run sequentially in single-process mode and may take several minutes. Parallelized execution is planned for an upcoming release.
-
 ## See It Catch Real Bugs
 
 Clone this repository and run the standalone stress-test suite in one command to see DeployProof evaluate 7 planted edge cases:
@@ -48,7 +47,7 @@ See [stress_fixtures/](stress_fixtures/) for documented fixtures covering weak t
 
 ## Why Deterministic
 
-DeployProof does not use an LLM in its verification path. A generative model used to check its own output shares the generator's underlying blind spots and hallucination patterns. By relying exclusively on AST mutation, regular expression and entropy scanning, and filesystem path resolution, DeployProof produces reproducible, verifiable pass/fail proofs.
+DeployProof does not use an LLM in its verification path. A generative model used to check its own output shares the generator's underlying blind spots and hallucination patterns. By relying exclusively on AST mutation, regular expression and entropy scanning, filesystem path resolution, and live package registry querying, DeployProof produces reproducible, verifiable pass/fail proofs.
 
 ## Positioning & Comparisons
 
@@ -56,8 +55,8 @@ DeployProof focuses on diff-scoped mutation testing and AI-IDE security checks; 
 
 ## Status & Roadmap
 
-- **Current (v0.1.0)**: Diff-scoped Tier 1 AST mutation testing, pre-push secrets scanner, GhostApproval symlink sandbox-escape detector, and Tier 2 CI verification gate via GitHub Actions (`mutmut`).
-- **Next**: Parallelized local mutation execution for large files, dependency registration-age analysis to prevent slopsquatting / hallucinated packages, and multi-language mutation support.
+- **Current (v0.1.0)**: Diff-scoped Tier 1 AST mutation testing, pre-push secrets scanner, GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner, and Tier 2 CI verification gate via GitHub Actions (`mutmut`).
+- **Next**: Multi-language mutation support and expanded ecosystem rule packs.
 
 ## License
 
