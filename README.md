@@ -1,55 +1,68 @@
 # DeployProof
 
-A deterministic AI-code deployability checker for fast local pre-checks and authoritative CI gates.
+A deterministic pre-push verification tool that catches untested AI code, leaked credentials, and sandbox escapes before you ship.
 
-## Installation
+Created by [SVS Praveen](https://github.com/SVSPraveen)
+
+## The Problem
+
+AI-assisted development generates code faster than developers can review it, creating measurable blind spots. CodeRabbit's December 2025 analysis of 470 pull requests found AI-co-authored code carried 1.7x more logic and correctness issues than human-written code, while GitGuardian (2026) reported AI-assisted commits leak credentials at roughly double the baseline rate (3.2% vs. 1.5%). Furthermore, standard line coverage is an unreliable proxy for test quality: empirical research (arXiv:2506.02954) demonstrated that test suites achieving 100% line coverage often score as low as 4% on mutation testing, missing fundamental edge cases. Meanwhile, agent sandbox-escape bugs (Wiz Research July 2026 GhostApproval disclosure; CVE-2026-50549, CVE-2026-12958, CVE-2026-39861) demonstrated that approval prompts can be deceived by path traversal symlinks.
+
+## What It Checks
+
+- **Mutation Score (not coverage)**: Mutates session AST operators (`>=`, `==`, `and`, `or`, `*`) to test whether your test suite actually catches broken logic.
+- **Secrets and Credentials Scanner**: Intercepts hardcoded API keys (OpenAI, AWS, GitHub, Stripe, private keys) and tracked `.env` files across all session files before push.
+- **Symlink and Sandbox-Escape Prevention**: Detects symbolic links whose resolved target escapes the repository root directory (CWE-61 / CWE-451).
+
+## Quickstart
+
+Install from PyPI:
 
 ```bash
 pip install deployproof
 ```
 
-For local development:
+Initialize in your repository:
 
 ```bash
-git clone https://github.com/SVSPraveen/deployproof.git
-cd deployproof
-pip install -e .[dev]
+deployproof init
 ```
 
-## Basic Usage
-
-Run local deployability pre-checks against current session changes:
+Run verification checks against current session changes:
 
 ```bash
 deployproof check
 ```
 
-> **Performance Note**: For files exceeding ~300 LOC, mutation pre-check may take several minutes due to sequential single-process test execution. Parallelization is planned for a future release.
+> **Performance Note**: For files exceeding ~300 LOC, local mutation pre-checks run sequentially in single-process mode and may take several minutes. Parallelized execution is planned for an upcoming release.
 
-## Features
+## See It Catch Real Bugs
 
-- **Smart Session Diff Scoping**: Automatically identifies uncommitted working-tree edits or branch commits (`--base <ref>`) without whole-repo overhead. Test files are safely excluded from mutation targets.
-- **Two-Tier Mutation Testing**: Fast local AST pre-check (Tier 1) for rapid developer iteration with an authoritative `mutmut` verification gate in GitHub Actions CI (Tier 2).
-- **Pre-Push Secrets & Credentials Scanner**: Scans all session diff files (`.py`, `.env`, `.json`, `.yml`, `.yaml`, `.toml`, config files) for hardcoded API keys (OpenAI, AWS, GitHub, Google, Slack, Stripe, HuggingFace, private keys) and high-entropy secret assignments, safely redacting values in terminal reports (`sk****************yz`).
-- **Symlink & GhostApproval Sandbox-Escape Scanner**: Identifies symlinks and verifies whether the resolved target escapes the repository boundary (CWE-61 / CWE-451, CVE-2026-50549), preventing deceptive tool approvals.
-- **Optional WSL Bridge (Windows)**: Run authoritative `mutmut` locally via WSL with `deployproof check --wsl`.
-
-## Optional WSL Integration (Windows)
-
-To run verified `mutmut` locally on Windows via WSL, create a dedicated Linux virtualenv:
+Clone this repository and run the standalone stress-test suite in one command to see DeployProof evaluate 7 planted edge cases:
 
 ```bash
-wsl bash -c "python3 -m venv ~/.deployproof-wsl-venv && ~/.deployproof-wsl-venv/bin/pip install mutmut pytest"
+python stress_fixtures/run_stress_tests.py
 ```
 
-Then execute:
+See [stress_fixtures/](stress_fixtures/) for documented fixtures covering weak test suites, zero-test orphan modules, planted OpenAI/AWS credentials, and GhostApproval sandbox-escape traps.
 
-```bash
-deployproof check --wsl
-```
+## Why Deterministic
 
-If WSL or the Linux venv is not configured, DeployProof automatically falls back to the local Tier 1 pre-check without crashing.
+DeployProof does not use an LLM in its verification path. A generative model used to check its own output shares the generator's underlying blind spots and hallucination patterns. By relying exclusively on AST mutation, regular expression and entropy scanning, and filesystem path resolution, DeployProof produces reproducible, verifiable pass/fail proofs.
+
+## Positioning & Comparisons
+
+DeployProof focuses on diff-scoped mutation testing and AI-IDE security checks; it does not replicate multi-language dependency impact mapping (handled by tools like `blastradius-cli`) or TypeScript/JavaScript static rule analysis (handled by tools like `Ratchet CLI`).
+
+## Status & Roadmap
+
+- **Current (v0.1.0)**: Diff-scoped Tier 1 AST mutation testing, pre-push secrets scanner, GhostApproval symlink sandbox-escape detector, and Tier 2 CI verification gate via GitHub Actions (`mutmut`).
+- **Next**: Parallelized local mutation execution for large files, dependency registration-age analysis to prevent slopsquatting / hallucinated packages, and multi-language mutation support.
 
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+## Author
+
+SVS Praveen — [github.com/SVSPraveen](https://github.com/SVSPraveen)
