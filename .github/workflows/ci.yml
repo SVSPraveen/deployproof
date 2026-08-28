@@ -51,12 +51,43 @@ jobs:
         pip install -e .[dev]
         pip install mutmut>=3.7.0
 
-    - name: Run Authoritative mutmut Check on Session Diff
+    - name: Scope and Run Tier 2 Verified mutmut Check
       run: |
-        echo "=== Running Tier 2 Authoritative Mutation Testing ==="
-        # Run mutmut on source package
-        mutmut run || true
-        mutmut export-cicd-stats || true
-        if [ -f mutants/mutmut-cicd-stats.json ]; then
-          cat mutants/mutmut-cicd-stats.json
+        echo "=== Resolving Tier 2 Diff Scope ==="
+        python -c "
+        import os, sys
+        from pathlib import Path
+        from deployproof.diff import resolve_changed_python_files
+
+        root = Path.cwd()
+        base_ref = os.environ.get('GITHUB_BASE_REF')
+        if not base_ref and os.environ.get('GITHUB_EVENT_BEFORE') and os.environ.get('GITHUB_EVENT_BEFORE') != '0000000000000000000000000000000000000000':
+            base_ref = os.environ.get('GITHUB_EVENT_BEFORE')
+
+        target_files = resolve_changed_python_files(cwd=root, base=base_ref)
+        if not target_files:
+            print('Tier 2: No modified Python application files in diff scope. Skipping mutmut run.')
+            sys.exit(0)
+
+        rel_paths = [str(f.relative_to(root).as_posix()) for f in target_files]
+        print(f'Tier 2 Target Scope ({len(rel_paths)} file(s)):')
+        for p in rel_paths:
+            print(f'  • {p}')
+
+        paths_str = '\n    '.join(rel_paths)
+        cfg = f'[mutmut]\nsource_paths =\n    {paths_str}\n'
+        Path('setup.cfg').write_text(cfg, encoding='utf-8')
+        "
+        
+        if [ -f setup.cfg ]; then
+          echo "=== Executing mutmut on Scoped Files ==="
+          mutmut run || true
+          mutmut export-cicd-stats || true
+          if [ -f mutants/mutmut-cicd-stats.json ]; then
+            echo "=== Tier 2 mutmut Stats ==="
+            cat mutants/mutmut-cicd-stats.json
+          fi
         fi
+      env:
+        GITHUB_BASE_REF: ${{ github.base_ref }}
+        GITHUB_EVENT_BEFORE: ${{ github.event.before }}
