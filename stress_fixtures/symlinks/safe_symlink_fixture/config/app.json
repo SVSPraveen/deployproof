@@ -1,0 +1,5 @@
+{
+  "service": "billing_worker",
+  "env": "production",
+  "pool_size": 16
+}

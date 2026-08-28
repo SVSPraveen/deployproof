@@ -18,6 +18,7 @@ from deployproof.diff import (
 from deployproof.mutator import run_mutation_tests
 from deployproof.reporter import LARGE_FILE_LOC_THRESHOLD, format_report
 from deployproof.secrets import scan_session_files_for_secrets
+from deployproof.symlinks import scan_session_files_for_symlinks
 from deployproof.wsl import check_wsl_readiness, run_wsl_mutmut
 
 
@@ -120,10 +121,13 @@ def handle_check(args: argparse.Namespace) -> int:
         print("Working tree is clean. Use --base <ref> or --files <path...> to evaluate specific files.")
         return 0
 
-    # 1. Run Secrets & Credentials Scanner across all session files
+    # 1. Run Symlink & Sandbox Escape Scanner across all session files
+    symlink_result = scan_session_files_for_symlinks(session_files, repo_root=repo_root or cwd)
+
+    # 2. Run Secrets & Credentials Scanner across all session files
     secrets_result = scan_session_files_for_secrets(session_files)
 
-    # 2. Filter target Python files for mutation testing
+    # 3. Filter target Python files for mutation testing
     if args.files:
         target_files = [f for f in session_files if f.is_file() and f.suffix == ".py"]
     else:
@@ -152,7 +156,8 @@ def handle_check(args: argparse.Namespace) -> int:
             wsl_res = run_wsl_mutmut(repo_root or cwd, target_files)
             if wsl_res.get("success"):
                 print(wsl_res.get("stdout", ""))
-                return 0 if len(secrets_result.findings) == 0 else 1
+                has_security_issue = bool(secrets_result.findings or symlink_result.escape_findings)
+                return 1 if has_security_issue else 0
             else:
                 print(f"WSL execution error: {wsl_res.get('error') or wsl_res.get('stderr')}", file=sys.stderr)
                 print("Falling back to Tier 1 local pre-check...")
@@ -171,13 +176,18 @@ def handle_check(args: argparse.Namespace) -> int:
         result=result,
         target_files=target_files,
         secrets_result=secrets_result,
+        symlink_result=symlink_result,
         repo_root=repo_root or cwd,
         threshold=args.threshold,
     )
     print(report_text)
 
-    # Fail if mutation score threshold not met or credentials detected
-    if result.mutation_score < args.threshold or len(secrets_result.findings) > 0:
+    # Fail if mutation score threshold not met, secrets detected, or symlink sandbox escapes found
+    if (
+        result.mutation_score < args.threshold
+        or len(secrets_result.findings) > 0
+        or len(symlink_result.escape_findings) > 0
+    ):
         return 1
     return 0
 

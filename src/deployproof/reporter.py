@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List, Optional
 from deployproof.mutator import MutationResult
 from deployproof.secrets import SecretsScanResult
+from deployproof.symlinks import SymlinkScanResult
 
 LARGE_FILE_LOC_THRESHOLD = 300
 
@@ -12,10 +13,11 @@ def format_report(
     result: MutationResult,
     target_files: List[Path],
     secrets_result: Optional[SecretsScanResult] = None,
+    symlink_result: Optional[SymlinkScanResult] = None,
     repo_root: Optional[Path] = None,
     threshold: float = 80.0,
 ) -> str:
-    """Format mutation testing results and secrets scan as clean human-readable terminal output."""
+    """Format mutation testing results, secrets scan, and symlink escape checks as terminal output."""
     lines: List[str] = []
     lines.append("DeployProof — LOCAL PRE-CHECK (approximate) — not the verified score")
     lines.append("=" * 68)
@@ -44,6 +46,34 @@ def format_report(
                 lines.append(f"  • {rel}")
     else:
         lines.append("  (No modified Python files in scope)")
+
+    # Symlink & Sandbox Escape Scan section
+    lines.append("\nSymlink & Sandbox Escape Scan (CWE-61/CWE-451):")
+    if symlink_result and symlink_result.escape_findings:
+        escape_count = len(symlink_result.escape_findings)
+        lines.append(
+            f"  [!] {escape_count} sandbox-escape symlink{'s' if escape_count != 1 else ''} detected:"
+        )
+        for idx, finding in enumerate(symlink_result.escape_findings, 1):
+            try:
+                rel_sym = finding.symlink_path.relative_to(root)
+            except ValueError:
+                rel_sym = finding.symlink_path
+            lines.append(f"\n    [{idx}] {rel_sym} -> {finding.link_target_raw}")
+            lines.append(f"        Apparent Path:   {rel_sym}")
+            lines.append(f"        Resolved Target: {finding.resolved_target} (Exists on disk: {finding.target_exists})")
+            lines.append("        Severity:        CRITICAL (Escapes repository sandbox)")
+            lines.append(f"        Note:            {finding.description}")
+    elif symlink_result and symlink_result.safe_symlinks:
+        safe_count = len(symlink_result.safe_symlinks)
+        lines.append(
+            f"  Clean: No sandbox-escape symlinks detected across {symlink_result.files_scanned} session files ({safe_count} safe in-repo symlink{'s' if safe_count != 1 else ''} verified)."
+        )
+    else:
+        scanned_count = symlink_result.files_scanned if symlink_result else file_count
+        lines.append(
+            f"  Clean: No symlinks or sandbox-escape traversal links detected across {scanned_count} session file{'s' if scanned_count != 1 else ''}."
+        )
 
     # Secrets scan section
     lines.append("\nSecrets & Credentials Pre-Push Scan:")
@@ -152,7 +182,11 @@ def format_report(
 
     lines.append("\n" + "=" * 68)
     lines.append("Notice: Local pre-check only. Full verified score runs in CI on push (via mutmut).")
-    if result.untested_files:
+    if symlink_result and symlink_result.escape_findings:
+        lines.append(
+            f"SECURITY ALERT: {len(symlink_result.escape_findings)} symlink(s) escape repository sandbox. Do not approve or push."
+        )
+    elif result.untested_files:
         lines.append(
             f"Pre-check FAILED: {len(result.untested_files)} file(s) have 0 tests. Write tests for these files before pushing."
         )
