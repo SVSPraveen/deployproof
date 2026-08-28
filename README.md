@@ -2,11 +2,12 @@
 
 > A pre-push verification tool for AI-assisted codebases: mutation testing, credential scanning, sandbox-escape detection, and dependency hallucination checks.
 
-<!-- Once the package is published to PyPI, replace the static badge below with:
-     [![PyPI version](https://img.shields.io/pypi/v/deployproof)](https://pypi.org/project/deployproof/) -->
+<!-- Once the package is published to PyPI, replace the two static badges below with:
+     [![PyPI version](https://img.shields.io/pypi/v/deployproof)](https://pypi.org/project/deployproof/)
+     [![Python](https://img.shields.io/pypi/pyversions/deployproof)](https://pypi.org/project/deployproof/) -->
 [![PyPI](https://img.shields.io/badge/PyPI-not_yet_published-lightgrey)](https://pypi.org/project/deployproof/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/pypi/pyversions/deployproof)](https://pypi.org/project/deployproof/)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml)
 
 ---
