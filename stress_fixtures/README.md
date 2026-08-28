@@ -41,6 +41,8 @@ python stress_fixtures/run_stress_tests.py
 | **`01_safe_symlink`** | Legitimate in-repo symlink pointing to an internal `config/app.json`. | **0 False Positives** (Verified safe in-repo link). |
 | **`02_ghostapproval_escape`** | GhostApproval-class trap (CVE-2026-50549 / CWE-61 / CWE-451): apparent path `config/app_settings.json` points to `../../../../etc/shadow` outside repo root. | **Flags critical sandbox escape** (Exit code `1`, blocks push). |
 
+*Source: Wiz Research, GhostApproval vulnerability disclosure (July 2026); CVE-2026-50549, CVE-2026-12958, CVE-2026-39861 (CWE-61 / CWE-451).*
+
 ---
 
 ## Core Guarantee
