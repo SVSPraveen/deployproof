@@ -274,7 +274,6 @@ def get_modified_line_ranges(
     # Match @@ -old_start[,old_count] +new_start[,new_count] @@
     hunk_pattern = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
     modified_lines: Set[int] = set()
-
     for line in res.stdout.splitlines():
         m = hunk_pattern.match(line)
         if m:
@@ -283,5 +282,10 @@ def get_modified_line_ranges(
             for l in range(start, start + count):
                 modified_lines.add(l)
 
+    if not modified_lines:
+        return None
+
     return modified_lines
+
+
 
