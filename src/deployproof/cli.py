@@ -301,13 +301,16 @@ def handle_check(args: argparse.Namespace) -> int:
         )
     print(report_text)
 
+    if result.collection_error:
+        return 2
+
     # Fail if mutation score threshold not met, secrets detected, symlink sandbox escapes found, hallucinated packages detected, or strict flags triggered
     strict_mocks_triggered = bool(getattr(args, "strict_mocks", False) and mock_result.total_findings > 0)
     strict_error_triggered = bool(
         getattr(args, "strict_error_handling", False) and control_flow_result.total_findings > 0
     )
     if (
-        result.mutation_score < args.threshold
+        (result.mutation_score is not None and result.mutation_score < args.threshold)
         or len(result.untested_files) > 0
         or len(secrets_result.findings) > 0
         or len(symlink_result.escape_findings) > 0

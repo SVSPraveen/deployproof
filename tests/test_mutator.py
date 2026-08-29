@@ -135,3 +135,20 @@ def test_logic_bug_with_log_statement_scenario():
         assert 6 not in survived_lines  # print
         assert 7 in survived_lines or 8 in survived_lines  # logic bug
 
+
+def test_mutant_snippet_display_preserves_variable_names():
+    """Verify that mutating a numeric constant does not corrupt variable names containing digits."""
+    code = "is_py3 = _ver[0] == 3\n"
+    with tempfile.TemporaryDirectory() as tmpdir:
+        f = Path(tmpdir) / "compat.py"
+        f.write_text(code, encoding="utf-8")
+
+        mutants = generate_mutants_for_file(f)
+        const_3_mutants = [m for m in mutants if "Replace numeric constant '3' with '4'" in m.description]
+        assert len(const_3_mutants) == 1
+        m = const_3_mutants[0]
+        assert m.original_line == "is_py3 = _ver[0] == 3"
+        assert m.mutated_line == "is_py3 = _ver[0] == 4"
+        assert "is_py4" not in m.mutated_line
+
+

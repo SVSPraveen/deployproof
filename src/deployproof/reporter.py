@@ -43,11 +43,12 @@ def format_json_report(
         or strict_error_triggered
     )
     is_passed = (
-        not has_security_failure
+        not result.collection_error
+        and not has_security_failure
         and not result.untested_files
-        and result.mutation_score >= threshold
+        and (result.mutation_score is not None and result.mutation_score >= threshold)
     )
-    status_str = "passed" if is_passed else "failed"
+    status_str = "error" if result.collection_error else ("passed" if is_passed else "failed")
 
     # Scope
     scope_files = []
@@ -96,7 +97,7 @@ def format_json_report(
                 "file": rel_f,
                 "line": s.line_number,
                 "construct": s.construct_name,
-                "reason": s.reason,
+                "reason": getattr(s, "description", getattr(s, "reason", "")),
             }
         )
 
@@ -231,6 +232,7 @@ def format_json_report(
         "summary": {
             "target_files_count": len(target_files),
             "mutation_score": result.mutation_score,
+            "collection_error": result.collection_error,
             "threshold": threshold,
             "secrets_found": len(secrets_findings_data),
             "symlink_escapes_found": len(symlink_escapes_data),
@@ -253,6 +255,7 @@ def format_json_report(
         },
         "mutation_testing": {
             "score": result.mutation_score,
+            "collection_error": result.collection_error,
             "threshold": threshold,
             "total_mutants": result.total_mutants,
             "killed_mutants": result.killed_mutants,
@@ -501,13 +504,18 @@ def format_report(
 
     # Score section
     lines.append("\nLocal Pre-Check Mutation Verification:")
-    if result.total_mutants == 0:
+    if result.collection_error:
+        lines.append("  [!] Could not run test suite — tests failed to execute before any mutation testing began.")
+        lines.append(f"  Error:  {result.collection_error}")
+        lines.append("  Status: ERROR (Test suite collection failed)")
+        lines.append(f"  Time:   {result.duration_seconds:.2f}s")
+    elif result.total_mutants == 0:
         lines.append("  Mutants Generated: 0 (No mutable AST locations found)")
         lines.append("  Approx Score:      100.0%")
     else:
         if result.untested_files:
             status_tag = f"FAILED (0 tests collected for {len(result.untested_files)} file{'s' if len(result.untested_files) != 1 else ''})"
-        elif result.mutation_score < threshold:
+        elif result.mutation_score is not None and result.mutation_score < threshold:
             status_tag = f"FAILED (score {result.mutation_score:.1f}% below {threshold:.1f}%)"
         elif result.survived_mutants:
             status_tag = f"PASSED (with {len(result.survived_mutants)} surviving mutant{'s' if len(result.survived_mutants) != 1 else ''})"
@@ -585,7 +593,12 @@ def format_report(
 
     lines.append("\n" + "=" * 68)
     lines.append("Notice: Local pre-check only. Full verified score runs in CI on push (via mutmut).")
-    if symlink_result and symlink_result.escape_findings:
+    if result.collection_error:
+        lines.append(
+            "Pre-check ERROR: Could not run test suite — tests failed to execute before any mutation testing began."
+        )
+        lines.append(f"  Fix environment / dependency error: {result.collection_error}")
+    elif symlink_result and symlink_result.escape_findings:
         lines.append(
             f"SECURITY ALERT: {len(symlink_result.escape_findings)} symlink(s) escape repository sandbox. Do not approve or push."
         )
@@ -605,7 +618,7 @@ def format_report(
         lines.append(
             f"Pre-check FAILED: {len(result.untested_files)} file(s) have 0 tests. Write tests for these files before pushing."
         )
-    elif result.mutation_score < threshold:
+    elif result.mutation_score is not None and result.mutation_score < threshold:
         lines.append(
             f"Pre-check FAILED: Score {result.mutation_score:.1f}% is below threshold {threshold:.1f}% ({len(result.survived_mutants)} surviving mutants)."
         )

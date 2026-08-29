@@ -103,3 +103,11 @@ def test_scan_dependencies_aggregated_summary(tmp_path: Path):
         assert summary.medium_risk_count == 0
         assert summary.unknown_count == 0
         assert len(summary.findings) == 2
+
+
+def test_namespace_package_backports_ok():
+    """Verify namespace packages like backports with 0 direct releases are treated as OK rather than risky."""
+    status, age_days, first_date, details = query_pypi_registry("backports", cache={})
+    assert status == "OK"
+    assert "Namespace package" in details
+

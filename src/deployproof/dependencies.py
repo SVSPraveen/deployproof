@@ -9,12 +9,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
-# Standard library module names (Python 3.10+)
-STDLIB_MODULES: Set[str] = getattr(sys, "stdlib_module_names", set()) | {
+# Standard library module names (Python 3.10 through 3.14+)
+STDLIB_MODULES: Set[str] = set(getattr(sys, "stdlib_module_names", set())) | {
     "__future__",
     "_thread",
+    "_typeshed",
     "abc",
     "aifc",
+    "annotationlib",
     "argparse",
     "array",
     "ast",
@@ -74,10 +76,12 @@ STDLIB_MODULES: Set[str] = getattr(sys, "stdlib_module_names", set()) | {
     "ftplib",
     "functools",
     "gc",
+    "genericpath",
     "getopt",
     "getpass",
     "gettext",
     "glob",
+    "graphlib",
     "grp",
     "gzip",
     "hashlib",
@@ -113,6 +117,7 @@ STDLIB_MODULES: Set[str] = getattr(sys, "stdlib_module_names", set()) | {
     "multiprocessing",
     "netrc",
     "nntplib",
+    "ntpath",
     "numbers",
     "operator",
     "optparse",
@@ -163,6 +168,9 @@ STDLIB_MODULES: Set[str] = getattr(sys, "stdlib_module_names", set()) | {
     "socketserver",
     "spwd",
     "sqlite3",
+    "sre_compile",
+    "sre_constants",
+    "sre_parse",
     "ssl",
     "stat",
     "statistics",
@@ -246,6 +254,35 @@ IMPORT_TO_PYPI_MAP: Dict[str, str] = {
     "Bio": "biopython",
     "psycopg2": "psycopg2",
     "google": "protobuf",
+    "OpenSSL": "pyOpenSSL",
+    "openssl": "pyOpenSSL",
+    "OpenGL": "PyOpenGL",
+    "wx": "wxPython",
+    "gi": "PyGObject",
+    "googleapiclient": "google-api-python-client",
+    "kafka": "kafka-python",
+    "pydantic_core": "pydantic-core",
+    "pkg_resources": "setuptools",
+    "setuptools": "setuptools",
+    "brotli": "Brotli",
+    "zstandard": "zstandard",
+    "markupsafe": "MarkupSafe",
+    "sqlalchemy": "SQLAlchemy",
+    "playwright": "playwright",
+}
+
+# Known namespace umbrella roots (subpackages published separately on PyPI)
+KNOWN_NAMESPACE_ROOTS: Set[str] = {
+    "backports",
+    "google",
+    "azure",
+    "oslo",
+    "zope",
+    "jaraco",
+    "sphinxcontrib",
+    "ruamel",
+    "zc",
+    "plone",
 }
 
 MANIFEST_FILENAMES = {
@@ -254,6 +291,55 @@ MANIFEST_FILENAMES = {
     "setup.py",
     "setup.cfg",
 }
+
+
+def is_stdlib_or_internal(module_name: str) -> bool:
+    """Check if a module name is standard library, typeshed, or internal."""
+    cleaned = module_name.strip()
+    if not cleaned:
+        return True
+    if cleaned.startswith("_"):
+        return True
+    if cleaned in STDLIB_MODULES:
+        return True
+    if hasattr(sys, "stdlib_module_names") and cleaned in sys.stdlib_module_names:
+        return True
+    return False
+
+
+def is_requirements_manifest_file(file_path: Path) -> bool:
+    """
+    Check if a file is a requirements manifest file based on specific naming patterns.
+    
+    Accepts: requirements*.txt, *-requirements.txt, requirements/*.txt, constraints.txt, *.in, etc.
+    Rejects: arbitrary .txt files (LICENSE.txt, README.txt, NOTICE.txt, hello.txt, etc.).
+    """
+    name = file_path.name.lower()
+    parent_names = [p.name.lower() for p in file_path.parents]
+    in_req_dir = any(p in ("requirements", "reqs", "constraints") for p in parent_names)
+
+    if in_req_dir and file_path.suffix in (".txt", ".in"):
+        return True
+
+    if name in ("requirements.txt", "constraints.txt", "requirements.in", "constraints.in"):
+        return True
+
+    if name.startswith("requirements") and file_path.suffix in (".txt", ".in"):
+        return True
+
+    if name.startswith("constraints") and file_path.suffix in (".txt", ".in"):
+        return True
+
+    if name.endswith(("-requirements.txt", "_requirements.txt", ".requirements.txt", "-constraints.txt", "_constraints.txt", ".constraints.txt")):
+        return True
+
+    if name.endswith(("-requirements.in", "_requirements.in", ".requirements.in", "-constraints.in", "_constraints.in", ".constraints.in")):
+        return True
+
+    if name.endswith(".in") and any(k in name for k in ("req", "dev", "test", "base", "prod", "doc")):
+        return True
+
+    return False
 
 
 @dataclass(frozen=True)
@@ -277,7 +363,7 @@ def get_local_module_names(root: Path) -> Set[str]:
     """
     local_names: Set[str] = set()
 
-    search_dirs = [root, root / "src", root / "lib", root / "app"]
+    search_dirs = [root, root / "src", root / "lib", root / "app", root / "tests", root / "test", root / "examples"]
     for s_dir in search_dirs:
         if not s_dir.is_dir():
             continue
@@ -295,10 +381,11 @@ def get_local_module_names(root: Path) -> Set[str]:
         except (PermissionError, OSError):
             continue
 
-    # Also scan for all subfolders in the root tree that have __init__.py or py files (up to depth 3)
+    # Also scan recursively for package directories
     try:
-        for py_file in root.glob("*/*.py"):
-            if not any(part.startswith(".") or part in ("venv", ".venv", "build", "dist", "node_modules") for part in py_file.parts):
+        for py_file in root.rglob("*.py"):
+            if not any(part.startswith(".") or part in ("venv", ".venv", "build", "dist", "node_modules", "__pycache__") for part in py_file.parts):
+                local_names.add(py_file.stem)
                 local_names.add(py_file.parent.name)
     except (PermissionError, OSError):
         pass
@@ -402,6 +489,9 @@ def normalize_package_name(raw_name: str) -> str:
     cleaned = raw_name.strip()
     if cleaned in IMPORT_TO_PYPI_MAP:
         return IMPORT_TO_PYPI_MAP[cleaned]
+    for imp_k, pypi_v in IMPORT_TO_PYPI_MAP.items():
+        if imp_k.lower() == cleaned.lower():
+            return pypi_v
     return cleaned
 
 
@@ -437,7 +527,7 @@ def extract_new_imports_from_py_file(
 
             for alias in node.names:
                 top_name = alias.name.split(".")[0]
-                if top_name in STDLIB_MODULES or top_name in local_modules:
+                if is_stdlib_or_internal(top_name) or top_name in local_modules:
                     continue
                 pypi_name = normalize_package_name(top_name)
                 key = f"{pypi_name}:{node.lineno}"
@@ -462,7 +552,7 @@ def extract_new_imports_from_py_file(
                 continue
 
             top_name = node.module.split(".")[0]
-            if top_name in STDLIB_MODULES or top_name in local_modules:
+            if is_stdlib_or_internal(top_name) or top_name in local_modules:
                 continue
 
             pypi_name = normalize_package_name(top_name)
@@ -507,7 +597,7 @@ def extract_new_imports_from_py_file(
                 if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
                     raw_mod_name = first_arg.value.strip()
                     top_name = raw_mod_name.split(".")[0]
-                    if not top_name or top_name in STDLIB_MODULES or top_name in local_modules:
+                    if not top_name or is_stdlib_or_internal(top_name) or top_name in local_modules:
                         continue
 
                     pypi_name = normalize_package_name(top_name)
@@ -665,7 +755,7 @@ def _parse_requirements_file(
         m = req_name_re.match(raw_line)
         if m:
             pkg_name = m.group(1).strip()
-            if pkg_name not in STDLIB_MODULES and pkg_name not in local_modules:
+            if not is_stdlib_or_internal(pkg_name) and pkg_name not in local_modules:
                 try:
                     rel_source_type = file_path.relative_to(root).as_posix()
                 except ValueError:
@@ -696,14 +786,7 @@ def extract_new_manifest_dependencies(
         local_modules = get_local_module_names(root)
 
     name = file_path.name.lower()
-    is_requirements = (
-        name == "requirements.txt"
-        or name.endswith(".requirements.txt")
-        or name.startswith("requirements-")
-        or name.endswith("-requirements.txt")
-        or name.endswith(".in")
-        or file_path.suffix == ".txt"
-    )
+    is_requirements = is_requirements_manifest_file(file_path)
     is_pyproject = name == "pyproject.toml"
     is_setup_py = name == "setup.py"
     is_setup_cfg = name == "setup.cfg"
@@ -741,7 +824,7 @@ def extract_new_manifest_dependencies(
             # Check section headers
             if raw_line.startswith("[") and raw_line.endswith("]"):
                 header = raw_line.strip("[]").strip().lower()
-                if "dependencies" in header or header.endswith(".dependencies"):
+                if "dependencies" in header or header.endswith(".dependencies") or "optional-dependencies" in header:
                     in_dependency_section = True
                 else:
                     in_dependency_section = False
@@ -765,7 +848,7 @@ def extract_new_manifest_dependencies(
                     if m:
                         pkg_name = m.group(1).strip()
                         if pkg_name.lower() not in ("dependencies", "install_requires", "requires", "version", "name"):
-                            if pkg_name not in STDLIB_MODULES and pkg_name not in local_modules:
+                            if not is_stdlib_or_internal(pkg_name) and pkg_name not in local_modules:
                                 extracted.append(
                                     ExtractedDependency(
                                         name=normalize_package_name(pkg_name),
@@ -791,7 +874,7 @@ def extract_new_manifest_dependencies(
                     if m:
                         pkg_name = m.group(1).strip()
                         if pkg_name.lower() not in ("install_requires", "extras_require", "setup", "name", "version"):
-                            if pkg_name not in STDLIB_MODULES and pkg_name not in local_modules:
+                            if not is_stdlib_or_internal(pkg_name) and pkg_name not in local_modules:
                                 extracted.append(
                                     ExtractedDependency(
                                         name=normalize_package_name(pkg_name),
@@ -885,10 +968,19 @@ def query_pypi_registry(
     import urllib.request
 
     norm_name = package_name.strip()
+    if is_stdlib_or_internal(norm_name):
+        return ("OK", None, None, f"Standard library / internal module ({norm_name})")
+
+    if norm_name.lower() in KNOWN_NAMESPACE_ROOTS:
+        return ("OK", None, None, f"Namespace package umbrella root ('{norm_name}') - subpackages published separately on PyPI")
+
     if cache is not None and norm_name in cache:
         return cache[norm_name]
 
-    url = f"https://pypi.org/pypi/{norm_name}/json"
+    # Map import name to PyPI distribution name if known
+    canonical_pkg = normalize_package_name(norm_name)
+
+    url = f"https://pypi.org/pypi/{canonical_pkg}/json"
     req = urllib.request.Request(
         url,
         headers={"User-Agent": "DeployProof/0.1.7 (https://github.com/SVSPraveen/DeployProof)"},
@@ -913,8 +1005,10 @@ def query_pypi_registry(
                                 pass
 
                 if not timestamps:
-                    # Package exists on PyPI but has no release files
-                    result = ("MEDIUM_RISK", 0, None, "Package exists on PyPI but has 0 uploaded releases")
+                    if canonical_pkg.lower() in KNOWN_NAMESPACE_ROOTS or norm_name.lower() in KNOWN_NAMESPACE_ROOTS:
+                        result = ("OK", None, None, f"Namespace package umbrella root ('{canonical_pkg}') - subpackages published separately on PyPI")
+                    else:
+                        result = ("MEDIUM_RISK", 0, None, "Package exists on PyPI but has 0 uploaded releases")
                 else:
                     earliest_dt = min(timestamps)
                     now = datetime.datetime.now(datetime.timezone.utc)
@@ -941,12 +1035,15 @@ def query_pypi_registry(
 
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            result = (
-                "HIGH_RISK",
-                None,
-                None,
-                "Package does NOT exist on PyPI (HTTP 404) - hallucinated package name / slopsquatting vulnerability",
-            )
+            if canonical_pkg.lower() in KNOWN_NAMESPACE_ROOTS or norm_name.lower() in KNOWN_NAMESPACE_ROOTS:
+                result = ("OK", None, None, f"Namespace package umbrella root ('{norm_name}') - subpackages published separately on PyPI")
+            else:
+                result = (
+                    "HIGH_RISK",
+                    None,
+                    None,
+                    "Package does NOT exist on PyPI (HTTP 404) - hallucinated package name / slopsquatting vulnerability",
+                )
         else:
             result = ("UNKNOWN", None, None, f"PyPI HTTP Error {e.code}: {e.reason}")
     except (urllib.error.URLError, TimeoutError, OSError) as e:

@@ -190,15 +190,16 @@ def test_cli_strict_error_handling_gate(tmp_path: Path, capsys, monkeypatch):
         encoding="utf-8",
     )
 
-    # 1. Default run: informational -> exit code 0
-    exit_code_default = main(["check", "--files", str(src), str(test)])
+    # 1. Default run: informational -> exit code 0 (use --threshold 0 to isolate strict-error-handling
+    #    gate behaviour from the mutation score gate, since this fixture has minimal test coverage)
+    exit_code_default = main(["check", "--files", str(src), str(test), "--threshold", "0"])
     assert exit_code_default == 0
     captured = capsys.readouterr()
     assert "Control Flow & Error Handling (flagged for review):" in captured.out
     assert "unreachable_code" in captured.out
 
     # 2. Strict run: gate failed -> exit code 1
-    exit_code_strict = main(["check", "--files", str(src), str(test), "--strict-error-handling"])
+    exit_code_strict = main(["check", "--files", str(src), str(test), "--threshold", "0", "--strict-error-handling"])
     assert exit_code_strict == 1
     captured_strict = capsys.readouterr()
     assert "[!] STRICT GATE TRIGGERED:" in captured_strict.out

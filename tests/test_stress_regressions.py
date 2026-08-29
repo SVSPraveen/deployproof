@@ -71,7 +71,8 @@ def test_unrelated_passing_tests_scenario(tmp_path, monkeypatch):
 def test_collection_error_scenario(tmp_path, monkeypatch):
     """
     Verify that if a test file has a syntax / import collection error (exit code 2/4),
-    mutants are flagged as RUNNER_ERROR rather than silently marked killed or survived.
+    DeployProof detects baseline failure, populates collection_error without reporting
+    a fake mutation score, and exits with code 2.
     """
     monkeypatch.chdir(tmp_path)
     src = tmp_path / "service.py"
@@ -86,8 +87,14 @@ def test_collection_error_scenario(tmp_path, monkeypatch):
         extra_pytest_args=[str(broken_test)],
     )
 
-    # Collection error should produce runner_errors
-    assert len(res.runner_errors) == res.total_mutants
+    # Baseline collection error should be flagged with details and no mutation score
+    assert res.collection_error is not None
+    assert "this_module_does_not_exist_xyz_123" in res.collection_error
+    assert res.mutation_score is None
+
+    # CLI returns distinct exit code 2
+    exit_code = main(["check", "--files", str(src), "--tests", str(broken_test)])
+    assert exit_code == 2
 
 
 def test_utf8_emoji_commit_message(tmp_path):

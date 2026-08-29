@@ -67,8 +67,17 @@ KNOWN_PATTERNS: List[Tuple[str, Pattern[str], str]] = [
     ),
 ]
 
+CREDENTIAL_VAR_RE = re.compile(
+    r"(?i)\b("
+    r"[a-z0-9_]*(?:api_?key|api_?secret|secret_?key|client_?secret|app_?secret|signing_?secret|jwt_?secret|private_?key)[a-z0-9_]*"
+    r"|[a-z0-9_]*(?:auth_?token|access_?token|bearer_?token|refresh_?token|session_?token|security_?token|deploy_?token|webhook_?token|api_?token)[a-z0-9_]*"
+    r"|[a-z0-9_]*(?:password|passwd|passphrase|pwd)[a-z0-9_]*"
+    r"|(?:[a-z0-9_]+_)?(?:secret|token|credential)(?:_[a-z0-9_]+)?"
+    r")\b"
+)
+
 GENERIC_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b([a-z0-9_]*(?:api_?key|secret|token|pass(?:word|wd)?|auth_?token|access_?token|private_?key|client_?secret)[a-z0-9_]*)\s*[:=]\s*(?:[\"']([^\"'\r\n]{16,})[\"']|([^\s\"'#]{16,}))"
+    r"(?i)\b([a-z0-9_]+)\s*[:=]\s*(?:[\"']([^\"'\r\n]{16,})[\"']|([^\s\"'#;]{16,}))"
 )
 
 PLACEHOLDER_EXACT_OR_PREFIX = {
@@ -130,6 +139,33 @@ def is_placeholder(value: str) -> bool:
     return False
 
 
+def is_non_secret_code_or_schema(val: str, is_quoted: bool, file_path: Path) -> bool:
+    """Determine if an assigned candidate value is code, schema, or documentation rather than a secret literal."""
+    file_name = file_path.name.lower()
+    is_env = file_name in ENV_FILE_NAMES or file_name.startswith(".env.") or file_path.suffix in (".env", ".ini", ".cfg")
+
+    # In code and doc files (.py, .js, .rst, .md, etc.), a secret assignment MUST be a quoted string literal
+    if not is_env and not is_quoted:
+        return True
+
+    # Real credential secrets (hashes, tokens, API keys, passwords) do not contain whitespace
+    if " " in val or "\t" in val:
+        return True
+
+    # If unquoted (in .env/config), ensure it doesn't look like code expressions
+    if not is_quoted:
+        if any(ch in val for ch in "()[]{}|~\\<>"):
+            return True
+        if any(val.startswith(p) for p in ("fields.", "click.", "contextvars.", "list(", "dict(", "set(", "_CURRENT_CONTEXT", "_PassArg.")):
+            return True
+        if any(k in val for k in ("lambda", "def ", "class ", "import ", "return ", ":data:", ":ref:", "..")):
+            return True
+        if val.count(".") >= 2:
+            return True
+
+    return False
+
+
 def scan_file_for_secrets(file_path: Path) -> List[SecretFinding]:
     """Scan a single file for credentials, keys, or .env tracking."""
     findings: List[SecretFinding] = []
@@ -185,21 +221,25 @@ def scan_file_for_secrets(file_path: Path) -> List[SecretFinding]:
             assignment_match = GENERIC_ASSIGNMENT_PATTERN.search(line)
             if assignment_match:
                 var_name = assignment_match.group(1)
-                secret_val = assignment_match.group(2) or assignment_match.group(3)
-                if secret_val and not is_placeholder(secret_val):
-                    entropy = calculate_shannon_entropy(secret_val)
-                    # Strings with length >= 16 and entropy >= 3.8 indicate high-entropy random credentials
-                    if entropy >= 3.8:
-                        findings.append(
-                            SecretFinding(
-                                file_path=file_path,
-                                line_number=line_idx,
-                                rule_name="High-Entropy Credential Assignment",
-                                description=f"High-entropy credential assigned to '{var_name}' (entropy: {entropy:.2f})",
-                                redacted_value=redact_secret(secret_val),
-                                snippet=stripped,
+                quoted_val = assignment_match.group(2)
+                unquoted_val = assignment_match.group(3)
+                is_quoted = quoted_val is not None
+                secret_val = quoted_val if is_quoted else unquoted_val
+                if secret_val and CREDENTIAL_VAR_RE.match(var_name):
+                    if not is_placeholder(secret_val) and not is_non_secret_code_or_schema(secret_val, is_quoted, file_path):
+                        entropy = calculate_shannon_entropy(secret_val)
+                        # Strings with length >= 16 and entropy >= 3.8 indicate high-entropy random credentials
+                        if entropy >= 3.8:
+                            findings.append(
+                                SecretFinding(
+                                    file_path=file_path,
+                                    line_number=line_idx,
+                                    rule_name="High-Entropy Credential Assignment",
+                                    description=f"High-entropy credential assigned to '{var_name}' (entropy: {entropy:.2f})",
+                                    redacted_value=redact_secret(secret_val),
+                                    snippet=stripped,
+                                )
                             )
-                        )
 
     return findings
 

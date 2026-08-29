@@ -298,3 +298,72 @@ def run_dynamic(plugin_name):
     assert all("Dynamic import with non-literal name" in d.unscanned_reason for d in unscanned)
 
 
+def test_requirements_manifest_file_recognition(tmp_path: Path):
+    """Verify arbitrary .txt files like LICENSE.txt are ignored, while genuine requirements files are parsed."""
+    root = tmp_path / "mock_repo"
+    root.mkdir()
+
+    # 1. Non-manifest text files that should be ignored
+    license_file = root / "LICENSE.txt"
+    license_file.write_text(
+        "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS\n"
+        "NEGLIGENCE OR OTHERWISE ARISING IN ANY WAY OUT OF THE USE\n"
+        "1. Redistributions of source code must retain the above notice.\n",
+        encoding="utf-8",
+    )
+    local_modules = get_local_module_names(root)
+    assert extract_new_manifest_dependencies(license_file, root, local_modules) == []
+
+    readme_file = root / "README.txt"
+    readme_file.write_text("Hello World project notes\n", encoding="utf-8")
+    assert extract_new_manifest_dependencies(readme_file, root, local_modules) == []
+
+    # 2. Genuine requirements files that should be parsed
+    req_file = root / "requirements-dev.txt"
+    req_file.write_text("pytest>=8.0.0\npytest-mock>=3.12.0\n", encoding="utf-8")
+    deps = extract_new_manifest_dependencies(req_file, root, local_modules)
+    pkg_names = [d.name for d in deps]
+    assert "pytest" in pkg_names
+    assert "pytest-mock" in pkg_names
+
+
+def test_stdlib_annotationlib_and_internal_typeshed(tmp_path: Path):
+    """Verify newer Python stdlib modules like annotationlib and _typeshed are not flagged as external dependencies."""
+    root = tmp_path / "mock_repo"
+    root.mkdir()
+
+    app_py = root / "compat.py"
+    app_py.write_text(
+        """
+import annotationlib
+from _typeshed import FileDescriptor
+import tomllib
+import zoneinfo
+""",
+        encoding="utf-8",
+    )
+
+    local_modules = get_local_module_names(root)
+    extracted = extract_new_imports_from_py_file(app_py, root=root, local_modules=local_modules)
+    assert len(extracted) == 0
+
+
+def test_openssl_import_mapping(tmp_path: Path):
+    """Verify import OpenSSL is correctly mapped to pyOpenSSL distribution."""
+    root = tmp_path / "mock_repo"
+    root.mkdir()
+
+    app_py = root / "tls.py"
+    app_py.write_text("import OpenSSL\nimport yaml\nimport bs4\nimport dateutil\n", encoding="utf-8")
+
+    local_modules = get_local_module_names(root)
+    extracted = extract_new_imports_from_py_file(app_py, root=root, local_modules=local_modules)
+    names = {d.import_name: d.name for d in extracted}
+
+    assert names["OpenSSL"] == "pyOpenSSL"
+    assert names["yaml"] == "PyYAML"
+    assert names["bs4"] == "beautifulsoup4"
+    assert names["dateutil"] == "python-dateutil"
+
+
+

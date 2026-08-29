@@ -141,3 +141,29 @@ SAFE_SETTING=production
         assert stripe_finding.line_number == 4
         assert stripe_finding.redacted_value.startswith("sk") and stripe_finding.redacted_value.endswith("90")
 
+
+def test_false_positive_patterns_ignored():
+    """Verify that identifiers like pass_arg, schema fields, and ContextVar tokens are not falsely flagged."""
+    content = '''
+# 1. Parameter / argument names containing pass_
+pass_script_info = click.make_pass_decorator(ScriptInfo, ensure=True)
+pass_arg = _PassArg.from_obj(normal_func)
+pass_original = validator_kwargs.get("pass_original", False)
+
+# 2. Schema field definitions
+password = fields.Str(load_only=True)
+password = fields.String(validate=lambda x: x == "password")
+password = fields.String(validate=[must_have_number, validate_length])
+
+# 3. ContextVar token objects and token collections
+self.token = _CURRENT_CONTEXT.set(self.context)
+self._cv_token: contextvars.Token[AppContext] | None = None
+tokens = list(environment.lex(environment.preprocess(source)))
+'''
+    with tempfile.TemporaryDirectory() as tmpdir:
+        f = Path(tmpdir) / "sample_code.py"
+        f.write_text(content, encoding="utf-8")
+        findings = scan_file_for_secrets(f)
+        assert len(findings) == 0
+
+

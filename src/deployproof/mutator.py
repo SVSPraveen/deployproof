@@ -43,9 +43,10 @@ class MutationResult:
     untested_files: List[Path] = field(default_factory=list)
     runner_errors: List[Tuple[Mutant, str]] = field(default_factory=list)
     skipped_constructs: List[SkippedConstruct] = field(default_factory=list)
-    mutation_score: float = 100.0
+    mutation_score: Optional[float] = 100.0
     duration_seconds: float = 0.0
     files_tested: List[Path] = field(default_factory=list)
+    collection_error: Optional[str] = None
 COMPARE_MAP = {ast.Eq: (ast.NotEq, '==', '!='), ast.NotEq: (ast.Eq, '!=', '=='), ast.Lt: (ast.GtE, '<', '>='), ast.LtE: (ast.Gt, '<=', '>'), ast.Gt: (ast.LtE, '>', '<='), ast.GtE: (ast.Lt, '>=', '<'), ast.In: (ast.NotIn, 'in', 'not in'), ast.NotIn: (ast.In, 'not in', 'in'), ast.Is: (ast.IsNot, 'is', 'is not'), ast.IsNot: (ast.Is, 'is not', 'is')}
 BINOP_MAP = {ast.Add: (ast.Sub, '+', '-'), ast.Sub: (ast.Add, '-', '+'), ast.Mult: (ast.Div, '*', '/'), ast.Div: (ast.Mult, '/', '*'), ast.FloorDiv: (ast.Div, '//', '/'), ast.Mod: (ast.Mult, '%', '*'), ast.Pow: (ast.Mult, '**', '*'), ast.BitAnd: (ast.BitOr, '&', '|'), ast.BitOr: (ast.BitAnd, '|', '&'), ast.BitXor: (ast.BitAnd, '^', '&')}
 BOOLOP_MAP = {ast.And: (ast.Or, 'and', 'or'), ast.Or: (ast.And, 'or', 'and')}
@@ -274,7 +275,19 @@ class MutationTransformer(ast.NodeTransformer):
                 if self.current_index == self.target_index:
                     new_cls, old_s, new_s = COMPARE_MAP[op_type]
                     new_ops[i] = new_cls()
-                    self.applied_info = (getattr(node, 'lineno', 1), f"Replace comparison '{old_s}' with '{new_s}'", old_s, new_s)
+                    lineno = getattr(node, "lineno", 1)
+                    left_node = node.left if i == 0 else node.comparators[i - 1]
+                    right_node = node.comparators[i]
+                    col_offset = getattr(left_node, "end_col_offset", None)
+                    end_col_offset = getattr(right_node, "col_offset", None)
+                    self.applied_info = (
+                        lineno,
+                        f"Replace comparison '{old_s}' with '{new_s}'",
+                        old_s,
+                        new_s,
+                        col_offset,
+                        end_col_offset,
+                    )
                 self.current_index += 1
         node.ops = new_ops
         return node
@@ -286,7 +299,17 @@ class MutationTransformer(ast.NodeTransformer):
             if self.current_index == self.target_index:
                 new_cls, old_s, new_s = BINOP_MAP[op_type]
                 node.op = new_cls()
-                self.applied_info = (getattr(node, 'lineno', 1), f"Replace binary operator '{old_s}' with '{new_s}'", old_s, new_s)
+                lineno = getattr(node, "lineno", 1)
+                col_offset = getattr(node.left, "end_col_offset", None)
+                end_col_offset = getattr(node.right, "col_offset", None)
+                self.applied_info = (
+                    lineno,
+                    f"Replace binary operator '{old_s}' with '{new_s}'",
+                    old_s,
+                    new_s,
+                    col_offset,
+                    end_col_offset,
+                )
             self.current_index += 1
         return node
 
@@ -297,7 +320,17 @@ class MutationTransformer(ast.NodeTransformer):
             if self.current_index == self.target_index:
                 new_cls, old_s, new_s = BOOLOP_MAP[op_type]
                 node.op = new_cls()
-                self.applied_info = (getattr(node, 'lineno', 1), f"Replace logical operator '{old_s}' with '{new_s}'", old_s, new_s)
+                lineno = getattr(node, "lineno", 1)
+                col_offset = getattr(node.values[0], "end_col_offset", None) if node.values else None
+                end_col_offset = getattr(node.values[1], "col_offset", None) if len(node.values) > 1 else None
+                self.applied_info = (
+                    lineno,
+                    f"Replace logical operator '{old_s}' with '{new_s}'",
+                    old_s,
+                    new_s,
+                    col_offset,
+                    end_col_offset,
+                )
             self.current_index += 1
         return node
 
@@ -308,24 +341,51 @@ class MutationTransformer(ast.NodeTransformer):
             if self.current_index == self.target_index:
                 new_cls, old_s, new_s = AUGASSIGN_MAP[op_type]
                 node.op = new_cls()
-                self.applied_info = (getattr(node, 'lineno', 1), f"Replace augmented assignment '{old_s}' with '{new_s}'", old_s, new_s)
+                lineno = getattr(node, "lineno", 1)
+                col_offset = getattr(node.target, "end_col_offset", None)
+                end_col_offset = getattr(node.value, "col_offset", None)
+                self.applied_info = (
+                    lineno,
+                    f"Replace augmented assignment '{old_s}' with '{new_s}'",
+                    old_s,
+                    new_s,
+                    col_offset,
+                    end_col_offset,
+                )
             self.current_index += 1
         return node
 
     def visit_Constant(self, node: ast.Constant) -> ast.AST:
         self.generic_visit(node)
+        lineno = getattr(node, "lineno", 1)
+        col_offset = getattr(node, "col_offset", None)
+        end_col_offset = getattr(node, "end_col_offset", None)
         if isinstance(node.value, bool):
             if self.current_index == self.target_index:
                 old_val = node.value
                 node.value = not node.value
-                self.applied_info = (getattr(node, 'lineno', 1), f"Replace boolean literal '{old_val}' with '{node.value}'", str(old_val), str(node.value))
+                self.applied_info = (
+                    lineno,
+                    f"Replace boolean literal '{old_val}' with '{node.value}'",
+                    str(old_val),
+                    str(node.value),
+                    col_offset,
+                    end_col_offset,
+                )
             self.current_index += 1
         elif isinstance(node.value, (int, float)) and (not isinstance(node.value, bool)):
             if self.current_index == self.target_index:
                 old_num = node.value
                 new_num = old_num + 1 if old_num != 0 else 1
                 node.value = new_num
-                self.applied_info = (getattr(node, 'lineno', 1), f"Replace numeric constant '{old_num}' with '{new_num}'", str(old_num), str(new_num))
+                self.applied_info = (
+                    lineno,
+                    f"Replace numeric constant '{old_num}' with '{new_num}'",
+                    str(old_num),
+                    str(new_num),
+                    col_offset,
+                    end_col_offset,
+                )
             self.current_index += 1
         return node
 
@@ -347,6 +407,37 @@ def parse_pytest_summary(output: str) -> Dict[str, Any]:
     total = passed + failed
     no_tests = total == 0 and errors == 0
     return {'passed': passed, 'failed': failed, 'errors': errors, 'total': total, 'no_tests_ran': no_tests}
+
+def extract_collection_error(output: str, returncode: int) -> str:
+    """Extract a concise and informative error message from pytest collection / startup failure."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    err_msgs: List[str] = []
+    for line in lines:
+        if line.startswith("E   ") or line.startswith("E:"):
+            err_msgs.append(line[4:].strip())
+        elif any(err in line for err in ["ModuleNotFoundError:", "ImportError:", "SyntaxError:", "NameError:", "AttributeError:", "ZoneInfoNotFoundError:", "SystemError:"]):
+            if not line.startswith("WARNING") and not line.startswith("Notice") and not line.startswith("="):
+                err_msgs.append(line)
+        elif "Error while loading conftest" in line or "ImportError while loading conftest" in line:
+            err_msgs.append(line)
+
+    if err_msgs:
+        deduped: List[str] = []
+        for msg in err_msgs:
+            if msg not in deduped:
+                deduped.append(msg)
+        return " | ".join(deduped[:3])
+
+    for line in lines:
+        if not line.startswith("=") and not line.startswith("!") and not line.startswith("platform") and not line.startswith("rootdir") and not line.startswith("plugins"):
+            if "error" in line.lower():
+                err_msgs.append(line)
+    if err_msgs:
+        return " | ".join(err_msgs[:2])
+
+    if lines:
+        return lines[-1]
+    return f"Pytest exited with return code {returncode}"
 
 def collect_skipped_constructs_for_file(file_path: Path) -> List[SkippedConstruct]:
     """Identify unsupported constructs in a file that Tier 1 skips."""
@@ -390,15 +481,30 @@ def generate_mutants_for_file(file_path: Path) -> List[Mutant]:
         desc = transformer.applied_info[1] if transformer.applied_info else f'Mutation #{idx + 1}'
         old_val = transformer.applied_info[2] if transformer.applied_info and len(transformer.applied_info) > 2 else ''
         new_val = transformer.applied_info[3] if transformer.applied_info and len(transformer.applied_info) > 3 else ''
-        orig_line = lines[lineno - 1].strip() if 0 <= lineno - 1 < len(lines) else ''
-        if old_val and new_val and (old_val in orig_line):
-            if old_val.isalpha():
-                mut_line = re.sub('\\b' + re.escape(old_val) + '\\b', new_val, orig_line, count=1)
+        col_offset = transformer.applied_info[4] if transformer.applied_info and len(transformer.applied_info) > 4 else None
+        end_col_offset = transformer.applied_info[5] if transformer.applied_info and len(transformer.applied_info) > 5 else None
+
+        raw_line = lines[lineno - 1] if 0 <= lineno - 1 < len(lines) else ''
+        orig_line = raw_line.strip()
+
+        if col_offset is not None and end_col_offset is not None and 0 <= col_offset <= end_col_offset <= len(raw_line):
+            span_text = raw_line[col_offset:end_col_offset]
+            if old_val and span_text == old_val:
+                mut_line = (raw_line[:col_offset] + new_val + raw_line[end_col_offset:]).strip()
+            elif old_val and (old_val in span_text):
+                mut_span = span_text.replace(old_val, new_val, 1)
+                mut_line = (raw_line[:col_offset] + mut_span + raw_line[end_col_offset:]).strip()
             else:
-                mut_line = orig_line.replace(old_val, new_val, 1)
+                idx_in_line = raw_line.find(old_val, col_offset)
+                if idx_in_line != -1:
+                    mut_line = (raw_line[:idx_in_line] + new_val + raw_line[idx_in_line + len(old_val):]).strip()
+                else:
+                    mut_lines = mutated_source.splitlines()
+                    mut_line = mut_lines[lineno - 1].strip() if 0 <= lineno - 1 < len(mut_lines) else orig_line
         else:
             mut_lines = mutated_source.splitlines()
             mut_line = mut_lines[lineno - 1].strip() if 0 <= lineno - 1 < len(mut_lines) else orig_line
+
         mutant_id = f'{file_path.name}:{lineno}:mutant_{idx + 1}'
         mutants.append(Mutant(mutant_id=mutant_id, file_path=file_path, line_number=lineno, description=desc, original_line=orig_line, mutated_line=mut_line, mutated_source=mutated_source))
     return mutants
@@ -406,37 +512,70 @@ def generate_mutants_for_file(file_path: Path) -> List[Mutant]:
 def discover_target_tests(target_files: List[Path], root: Path) -> List[str]:
     """Discover candidate pytest test targets relevant to the changed files."""
     matched_test_files: List[str] = []
-    tests_dirs = [root, root / 'tests', root / 'test']
-    existing_tests_dirs = [d for d in tests_dirs if d.is_dir()]
-    if not existing_tests_dirs:
-        return []
+    tests_dirs = [d for d in [root / 'tests', root / 'test'] if d.is_dir()]
+    if not tests_dirs:
+        tests_dirs = [root]
+
     for f in target_files:
         stem = f.stem
+        stems = {stem}
+        if stem.startswith('_'):
+            stems.add(stem.lstrip('_'))
+        if stem.endswith('s') and len(stem) > 1:
+            stems.add(stem.rstrip('s'))
+            if stem.startswith('_'):
+                stems.add(stem.lstrip('_').rstrip('s'))
+        else:
+            stems.add(stem + 's')
+            if stem.startswith('_'):
+                stems.add(stem.lstrip('_') + 's')
+
         direct_matched: List[str] = []
-        for t_dir in existing_tests_dirs:
-            candidates = [t_dir / f'test_{stem}.py', t_dir / f'{stem}_test.py', t_dir / f'test_{stem}s.py']
-            for c in candidates:
-                if c.is_file():
-                    try:
-                        rel = str(c.relative_to(root))
-                    except ValueError:
-                        rel = str(c)
-                    if rel not in direct_matched:
-                        direct_matched.append(rel)
+        for t_dir in tests_dirs:
+            for test_path in t_dir.rglob('*.py'):
+                filename = test_path.name
+                for s in stems:
+                    if filename in (f'test_{s}.py', f'{s}_test.py', f'test_{s}s.py') or (s.endswith('s') and filename == f'test_{s[:-1]}.py'):
+                        try:
+                            rel = str(test_path.relative_to(root))
+                        except ValueError:
+                            rel = str(test_path)
+                        if rel not in direct_matched:
+                            direct_matched.append(rel)
+
+            for s in stems:
+                for match_dir in t_dir.rglob(s):
+                    if match_dir.is_dir():
+                        for test_file in match_dir.rglob('*.py'):
+                            if test_file.name.startswith('test_') or test_file.name.endswith('_test.py'):
+                                try:
+                                    rel = str(test_file.relative_to(root))
+                                except ValueError:
+                                    rel = str(test_file)
+                                if rel not in direct_matched:
+                                    direct_matched.append(rel)
+
         if direct_matched:
             for m in direct_matched:
                 if m not in matched_test_files:
                     matched_test_files.append(m)
         else:
-            for t_dir in existing_tests_dirs:
-                parent_candidate = t_dir / f'test_{f.parent.name}.py'
-                if parent_candidate.is_file():
-                    try:
-                        rel = str(parent_candidate.relative_to(root))
-                    except ValueError:
-                        rel = str(parent_candidate)
-                    if rel not in matched_test_files:
-                        matched_test_files.append(rel)
+            parent_name = f.parent.name
+            parent_stems = {parent_name}
+            if parent_name.startswith('_'):
+                parent_stems.add(parent_name.lstrip('_'))
+            for t_dir in tests_dirs:
+                for test_path in t_dir.rglob('*.py'):
+                    filename = test_path.name
+                    for ps in parent_stems:
+                        if filename in (f'test_{ps}.py', f'{ps}_test.py'):
+                            try:
+                                rel = str(test_path.relative_to(root))
+                            except ValueError:
+                                rel = str(test_path)
+                            if rel not in matched_test_files:
+                                matched_test_files.append(rel)
+
     return matched_test_files
 
 def run_mutation_tests(target_files: List[Path], repo_root: Optional[Path]=None, test_runner_timeout: float=10.0, extra_pytest_args: Optional[List[str]]=None) -> MutationResult:
@@ -472,7 +611,7 @@ def run_mutation_tests(target_files: List[Path], repo_root: Optional[Path]=None,
     else:
         targeted_tests = discover_target_tests(target_files, root)
         pytest_args = targeted_tests if targeted_tests else []
-    pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=no', '-p', 'no:cacheprovider'] + pytest_args
+    pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=short', '-p', 'no:cacheprovider'] + pytest_args
     baseline_has_no_tests = False
     baseline_duration = 1.0
     baseline_summary: Dict[str, Any] = {}
@@ -482,10 +621,59 @@ def run_mutation_tests(target_files: List[Path], repo_root: Optional[Path]=None,
         baseline_duration = max(time.time() - t0, 0.5)
         combined_output = baseline_res.stdout + '\n' + baseline_res.stderr
         baseline_summary = parse_pytest_summary(combined_output)
+        
+        is_collection_error = (
+            baseline_res.returncode in (2, 3, 4)
+            or 'modulenotfounderror' in combined_output.lower()
+            or 'importerror' in combined_output.lower()
+            or 'error during collection' in combined_output.lower()
+            or 'error while loading conftest' in combined_output.lower()
+            or 'zoneinfonotfounderror' in combined_output.lower()
+            or (baseline_summary.get('errors', 0) > 0 and baseline_summary.get('passed', 0) == 0 and baseline_summary.get('failed', 0) == 0)
+        )
+        if is_collection_error:
+            err_msg = extract_collection_error(combined_output, baseline_res.returncode)
+            return MutationResult(
+                total_mutants=len(all_mutants),
+                killed_mutants=0,
+                survived_mutants=[],
+                untested_files=[],
+                runner_errors=[],
+                skipped_constructs=all_skipped,
+                mutation_score=None,
+                duration_seconds=round(time.time() - start_time, 2),
+                files_tested=target_files,
+                collection_error=err_msg,
+            )
+
         if baseline_res.returncode == 5 or baseline_summary['no_tests_ran']:
             if pytest_args:
-                fallback_res = subprocess.run([sys.executable, '-B', '-m', 'pytest', '-q', '--tb=no', '-p', 'no:cacheprovider'], cwd=root, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=max(test_runner_timeout * 2, 20.0))
-                fb_summary = parse_pytest_summary(fallback_res.stdout + '\n' + fallback_res.stderr)
+                fallback_res = subprocess.run([sys.executable, '-B', '-m', 'pytest', '-q', '--tb=short', '-p', 'no:cacheprovider'], cwd=root, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=max(test_runner_timeout * 2, 20.0))
+                fb_combined = fallback_res.stdout + '\n' + fallback_res.stderr
+                fb_summary = parse_pytest_summary(fb_combined)
+                is_fb_collection_error = (
+                    fallback_res.returncode in (2, 3, 4)
+                    or 'modulenotfounderror' in fb_combined.lower()
+                    or 'importerror' in fb_combined.lower()
+                    or 'error during collection' in fb_combined.lower()
+                    or 'error while loading conftest' in fb_combined.lower()
+                    or 'zoneinfonotfounderror' in fb_combined.lower()
+                    or (fb_summary.get('errors', 0) > 0 and fb_summary.get('passed', 0) == 0 and fb_summary.get('failed', 0) == 0)
+                )
+                if is_fb_collection_error:
+                    err_msg = extract_collection_error(fb_combined, fallback_res.returncode)
+                    return MutationResult(
+                        total_mutants=len(all_mutants),
+                        killed_mutants=0,
+                        survived_mutants=[],
+                        untested_files=[],
+                        runner_errors=[],
+                        skipped_constructs=all_skipped,
+                        mutation_score=None,
+                        duration_seconds=round(time.time() - start_time, 2),
+                        files_tested=target_files,
+                        collection_error=err_msg,
+                    )
                 if fallback_res.returncode == 5 or fb_summary['no_tests_ran']:
                     baseline_has_no_tests = True
                     untested_files_set.update(target_files)
@@ -495,12 +683,19 @@ def run_mutation_tests(target_files: List[Path], repo_root: Optional[Path]=None,
             else:
                 baseline_has_no_tests = True
                 untested_files_set.update(target_files)
-        elif baseline_res.returncode in (2, 3, 4) or baseline_summary['errors'] > 0:
-            err_output = combined_output.strip()
-            if 'ModuleNotFoundError' in err_output or 'ImportError' in err_output:
-                print("\n[!] Test suite failed to run before mutations (ModuleNotFoundError / ImportError).\n    If this is a newly cloned repo, run 'pip install -e .' first to install dependencies and entry points.\n", file=sys.stderr)
-    except Exception:
-        pass
+    except Exception as e:
+        return MutationResult(
+            total_mutants=len(all_mutants),
+            killed_mutants=0,
+            survived_mutants=[],
+            untested_files=[],
+            runner_errors=[],
+            skipped_constructs=all_skipped,
+            mutation_score=None,
+            duration_seconds=round(time.time() - start_time, 2),
+            files_tested=target_files,
+            collection_error=f"Execution exception during baseline test run: {type(e).__name__}: {e}",
+        )
     effective_timeout = max(test_runner_timeout, baseline_duration * 3.0 + 5.0)
     if baseline_has_no_tests:
         for mutant in all_mutants:

@@ -109,3 +109,50 @@ We tested the Tier 1 AST mutator against 7 advanced Python language constructs t
 1. **Zero Hard Crashes**: `ast.parse` and `ast.unparse` successfully parsed and regenerated valid Python ASTs across all 7 Python 3.10+ constructs without throwing unhandled exceptions.
 2. **Silent Skipping of Construct-Specific Semantics**: The mutator only mutates nested `Compare`, `BinOp`, `BoolOp`, and `Constant` nodes that happen to be children of these constructs. It **silently omits** structural mutations specific to walrus bindings, f-string ternaries, match pattern schemas, await removal, and generator yields.
 3. **Validation Conclusion**: Tier 1 is suitable strictly as a fast local pre-check for basic logic errors; Tier 2 (`mutmut` in CI) remains mandatory for verified mutation scoring.
+
+---
+
+## 4. Real-World Multi-Repository Validation & Production Hardening
+
+*Evaluation Date: August 29–30, 2026*  
+*Target Repositories*: 10 prominent open-source Python codebases (`requests`, `flask`, `httpx`, `click`, `jinja`, `marshmallow`, `urllib3`, `attrs`, `pydantic`, `rich`).
+
+Testing DeployProof against diverse, large-scale production codebases revealed 5 critical real-world edge cases that led to architectural hardening across the mutator, secrets scanner, dependency scanner, and CLI reporting layers:
+
+### 1. Recursive & Multi-Pattern Test Discovery (`mutator.py`)
+- **Observed Defect**: The initial test discovery looked exclusively for `tests/test_<stem>.py` at the repo root. Real repos use diverse structures:
+  - Singular `test/` directory (`urllib3`).
+  - Nested test subdirectories mirroring package structure (e.g. `tests/models/test_models.py` for `httpx/_models.py`).
+  - Leading underscore convention in source files (`src/attr/_make.py` tested by `tests/test_make.py`).
+- **Architectural Decision**: Implemented recursive test discovery searching both `tests/` and `test/` trees at arbitrary depth, matching `test_<stem>.py`, `<stem>_test.py`, and normalized stems with leading underscores stripped.
+
+### 2. Value-Based & Entropy-Driven Credential Detection (`secrets.py`)
+- **Observed Defect**: Name-based substring heuristics (`"token"`, `"pass_"`) produced unacceptable false-positive rates on production code:
+  - Keyword argument names: `pass_arg`, `pass_script_info`, `pass_original` (in `click`, `flask`).
+  - Schema/documentation field declarations: `password = fields.Str(...)` (in `marshmallow`).
+  - Context tokens: `self.token = _CURRENT_CONTEXT.set(...)` (in `httpx`).
+- **Architectural Decision**: Replaced identifier substring matching with value-based AST assignment analysis:
+  - Requires string literal values meeting high Shannon entropy thresholds (entropy >= 3.5).
+  - Explicit pattern matching for recognized credential formats (OpenAI `sk-`, Anthropic `sk-ant-`, AWS `AKIA`, GitHub `ghp_`, Stripe `sk_live_`, RSA/SSH private keys).
+  - Identifier names containing "password" or "secret" must be assigned non-trivial string literals, not schema objects or parameter definitions.
+
+### 3. Manifest Filtering & Import-to-Distribution Mapping (`dependencies.py`)
+- **Observed Defect**:
+  - Any `.txt` file was previously treated as a requirements manifest, causing legal text in `LICENSE.txt` (e.g. "THIS", "PROFITS", "NEGLIGENCE", "1.", "2.") to trigger phantom PyPI queries.
+  - Top-level Python import names were queried directly against PyPI distribution names, causing false `HIGH_RISK` (404) flags on valid packages where import and distribution names differ (e.g., `import OpenSSL` vs. PyPI `pyOpenSSL`).
+- **Architectural Decision**:
+  - Enforced strict requirements manifest path matching (`requirements*.txt`, `*-requirements.txt`, `requirements/*.txt`, `constraints*.txt`, `pyproject.toml`, `setup.cfg`, `setup.py`).
+  - Built-in canonical translation map for known import-to-distribution mismatches (`OpenSSL` → `pyOpenSSL`, `yaml` → `PyYAML`, `bs4` → `beautifulsoup4`, `PIL` → `Pillow`, `dateutil` → `python-dateutil`, `sklearn` → `scikit-learn`, `cv2` → `opencv-python`, `jwt` → `PyJWT`, `dotenv` → `python-dotenv`, `google.protobuf` → `protobuf`).
+
+### 4. AST Column-Offset Snippet Reconstruction (`mutator.py`)
+- **Observed Defect**: Reconstructing terminal before/after snippets using naive string `.replace(old_val, new_val, 1)` caused display corruption when the replaced value occurred as a substring inside an earlier variable name (e.g. mutating constant `3` to `4` in `is_py3 = _ver[0] == 3` displayed as `is_py4 = _ver[0] == 3`).
+- **Architectural Decision**: Replaced whole-line substring replacements with AST node source column tracking (`col_offset` to `end_col_offset`) and token boundary slicing, ensuring the exact AST node being mutated is what is visually reflected in reports.
+
+### 5. Baseline Collection Failure Isolation & Distinct Exit Codes (`mutator.py`, `reporter.py`, `cli.py`)
+- **Observed Defect**: When a repository's test suite failed to collect or execute before mutation testing began (e.g. missing dependencies, unbuilt C/Rust extensions in `pydantic`, or OS-specific missing timezones in `marshmallow`), DeployProof reported `Score: 0.0%`, making broken environments indistinguishable from legitimate test-suite quality failures.
+- **Architectural Decision**:
+  - Implemented baseline failure-to-collect detection (pytest exit codes 2/3/4, `ModuleNotFoundError`, `ImportError`, conftest crashes) before any mutants are generated.
+  - Omitted the mutation score entirely (`score = None`) in text and JSON outputs.
+  - Output explicit diagnostic guidance: `"Could not run test suite — tests failed to execute before any mutation testing began"` with the underlying exception details.
+  - Assigned distinct **exit code `2`** to environment/runner errors, allowing CI/CD pipelines to differentiate environment blockers from verification gate failures (exit code `1`) and clean passing runs (exit code `0`).
+

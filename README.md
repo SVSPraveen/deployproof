@@ -5,7 +5,7 @@
 [![PyPI version](https://img.shields.io/badge/pypi-v0.1.7-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-79%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
+[![Tests](https://img.shields.io/badge/tests-88%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
 [![Stress Tests](https://img.shields.io/badge/stress%20tests-11%2F11%20passed-2ea44f.svg)](stress_fixtures/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -37,7 +37,12 @@ Run all verification checks against changes in the current session (git diff):
 deployproof check
 ```
 
-Output includes a section for each check — symlink scan, secrets scan, dependency scan, mock detection, control flow analysis, and mutation score — with a pass/fail line at the bottom. Exit code is non-zero on any finding that should block a push.
+Output includes a section for each check — symlink scan, secrets scan, dependency scan, mock detection, control flow analysis, and mutation score — with a pass/fail line at the bottom. 
+
+### Exit Codes:
+* `0` — **PASSED**: All verification checks passed and mutation score meets threshold.
+* `1` — **FAILED**: Code quality or security gate triggered (mutation score below threshold, untested files, hardcoded secrets, sandbox-escape symlinks, hallucinated packages, or strict flags).
+* `2` — **ERROR**: Test environment failure (test suite failed to collect or execute before mutation testing began due to missing dependencies or broken imports).
 
 ### Example Walkthrough
 
@@ -253,7 +258,7 @@ Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS cr
 
 ## Status & Roadmap
 
-- **Current (v0.1.7):** Diff-scoped AST mutation testing, secrets scanner (including unquoted .env values), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with recursive `-r` requirements scanning and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks` and deduplicated decorator detection), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
+- **Current (v0.1.7):** Diff-scoped AST mutation testing (with recursive `test/`/`tests/` discovery and precise column-offset snippet reconstruction), baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner (including unquoted .env values and prefix validation), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks` and deduplicated decorator detection), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, 88 unit tests, machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
 - **Next:** Multi-language mutation support and expanded ecosystem rule packs.
 
 ## Contributing
