@@ -4,7 +4,9 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/deployproof.svg?color=007ec6)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/pypi/pyversions/deployproof.svg?color=3776ab)](https://pypi.org/project/deployproof/)
+[![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-79%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
+[![Stress Tests](https://img.shields.io/badge/stress%20tests-11%2F11%20passed-2ea44f.svg)](stress_fixtures/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
@@ -151,13 +153,13 @@ deployproof check --json
 
 ## See It Catch Real Bugs
 
-Clone this repository and run the standalone stress-test suite to see DeployProof evaluate 7 planted edge cases:
+Clone this repository and run the standalone stress-test suite to see DeployProof evaluate 11 planted edge cases:
 
 ```bash
 python stress_fixtures/run_stress_tests.py
 ```
 
-Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS credentials, and GhostApproval sandbox-escape traps.
+Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS credentials, GhostApproval sandbox-escape traps, swallowed exceptions/dead code, and mock-masked broken implementations.
 
 ## Status & Roadmap
 
