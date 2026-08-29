@@ -2,10 +2,10 @@
 
 > A pre-push verification tool for AI-assisted codebases: mutation testing, credential scanning, sandbox-escape detection, and dependency hallucination checks.
 
-[![PyPI version](https://img.shields.io/pypi/v/deployproof)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/pypi/v/deployproof.svg?color=blue)](https://pypi.org/project/deployproof/)
+[![Python versions](https://img.shields.io/pypi/pyversions/deployproof.svg?color=blue)](https://pypi.org/project/deployproof/)
+[![Tests](https://img.shields.io/badge/tests-61%20passed-brightgreen.svg)](https://github.com/SVSPraveen/DeployProof)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/pypi/pyversions/deployproof)](https://pypi.org/project/deployproof/)
-[![CI](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml)
 
 ---
 
@@ -63,7 +63,7 @@ Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS cr
 
 ## Status & Roadmap
 
-- **Current (v0.1.1):** Diff-scoped AST mutation testing, secrets scanner, GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner, and Tier 2 CI verification via GitHub Actions (mutmut).
+- **Current (v0.1.2):** Diff-scoped AST mutation testing, secrets scanner, GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner, and Tier 2 CI verification via GitHub Actions (mutmut).
 - **Next:** Multi-language mutation support and expanded ecosystem rule packs.
 
 ## Contributing

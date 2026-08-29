@@ -9,7 +9,7 @@ from deployproof.cli import create_parser, main
 
 def test_version():
     """Verify version string is defined and matches expected version."""
-    assert __version__ == "0.1.1"
+    assert __version__ == "0.1.2"
 
 
 def test_parser_version(capsys):
@@ -19,7 +19,7 @@ def test_parser_version(capsys):
         parser.parse_args(["--version"])
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    assert "deployproof 0.1.1" in captured.out or "deployproof 0.1.1" in captured.err
+    assert "deployproof 0.1.2" in captured.out or "deployproof 0.1.2" in captured.err
 
 
 def test_parser_help(capsys):
