@@ -39,6 +39,94 @@ deployproof check
 
 Output includes a section for each check — symlink scan, secrets scan, dependency scan, mock detection, control flow analysis, and mutation score — with a pass/fail line at the bottom. Exit code is non-zero on any finding that should block a push.
 
+### Example Walkthrough
+
+Given a newly written function `calculator.py`:
+
+```python
+def calculate_discount(price: float, rate: float) -> float:
+    if rate > 0.5:
+        return price * 0.5
+    return price * (1.0 - rate)
+```
+
+With an AI-generated test that achieves 100% line coverage by only asserting standard discounts (`rate = 0.2`):
+
+```python
+def test_calculate_discount_basic():
+    assert calculate_discount(100.0, 0.2) == 80.0
+```
+
+Running `deployproof check` mutates AST operators and detects that boundary conditions and threshold caps are untested:
+
+```
+$ deployproof check
+
+DeployProof - LOCAL PRE-CHECK (approximate) - not the verified score
+====================================================================
+
+Target Scope (1 file evaluated):
+  * calculator.py
+
+Symlink & Sandbox Escape Scan (CWE-61/CWE-451):
+  Clean: No symlinks or sandbox-escape traversal links detected across 1 session file.
+
+Secrets & Credentials Pre-Push Scan:
+  Clean: No hardcoded secrets or tracked .env files detected across 1 session file.
+
+Dependency & Slopsquatting Scan (PyPI Registry & Age Analysis):
+  Clean: No new external packages introduced across 1 session file.
+
+Mock Usage Introduced (flagged for review):
+  Clean: No modified test files in scope.
+
+Control Flow & Error Handling (flagged for review):
+  Clean: No bare excepts, swallowed exceptions, or unreachable code detected across 1 session file.
+
+Local Pre-Check Mutation Verification:
+  Score:  57.1% (4/7 mutants killed)
+  Status: FAILED (score 57.1% below 80.0%) (threshold: 80.0%)
+  Time:   2.27s
+
+Skipped Constructs: None (No known unsupported constructs detected)
+
+Surviving Mutants (3 unverified changes):
+
+  [1] calculator.py:2
+      Mutation: Replace numeric constant '0.5' with '1.5'
+      Original: if rate > 0.5:
+      Mutated:  if rate > 1.5:
+
+  [2] calculator.py:3
+      Mutation: Replace numeric constant '0.5' with '1.5'
+      Original: return price * 0.5
+      Mutated:  return price * 1.5
+
+  [3] calculator.py:3
+      Mutation: Replace binary operator '*' with '/'
+      Original: return price * 0.5
+      Mutated:  return price / 0.5
+
+====================================================================
+Notice: Local pre-check only. Full verified score runs in CI on push (via mutmut).
+Pre-check FAILED: Score 57.1% is below threshold 80.0% (3 surviving mutants).
+```
+
+Adding tests for threshold cap (`rate = 0.8`) and exact boundary (`rate = 0.5`) kills all mutants:
+
+```
+Local Pre-Check Mutation Verification:
+  Score:  100.0% (7/7 mutants killed)
+  Status: PASSED (threshold: 80.0%)
+  Time:   2.31s
+
+Surviving Mutants: None (All generated mutants caught by test suite)
+
+====================================================================
+Notice: Local pre-check only. Full verified score runs in CI on push (via mutmut).
+Pre-check clean: 100% of tested basic mutations caught.
+```
+
 ### CLI Options & Flags
 
 | Flag | Description |
