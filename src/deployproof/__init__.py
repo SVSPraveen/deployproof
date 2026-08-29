@@ -1,3 +1,2 @@
-"""DeployProof - A deterministic AI-code deployability checker."""
-
-__version__ = "0.1.0"
+"""DeployProof: Deterministic deployability verification for AI-assisted code."""
+__version__ = "0.1.1"
