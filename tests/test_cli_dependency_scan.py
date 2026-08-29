@@ -204,3 +204,107 @@ def test_format_report_with_unscanned_dependency_source(tmp_path: Path):
     assert "1 unscanned dependency source (seen, not checked):" in report
     assert "* -r base.txt (Source: requirements.txt:2) - External requirements file include (-r) - seen, not checked" in report
 
+
+def test_cli_nested_requirements_hallucination_detection(tmp_path: Path, capsys, monkeypatch):
+    """
+    Verify exact case from audit:
+    requirements.txt has '-r requirements/base.txt'.
+    requirements/base.txt has a hallucinated fake package name.
+    Confirm the tool resolves the include, queries PyPI, flags the hallucinated package as HIGH_RISK,
+    and fails the CLI gate with exit code 1.
+    """
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+
+    req_dir = tmp_path / "requirements"
+    req_dir.mkdir()
+
+    base_txt = req_dir / "base.txt"
+    base_txt.write_text(
+        "requests>=2.28.0\n"
+        "fake-ai-hallucinated-package-xyz==1.0.0\n",
+        encoding="utf-8",
+    )
+
+    req_txt = tmp_path / "requirements.txt"
+    req_txt.write_text(
+        "-r requirements/base.txt\n"
+        "fastapi>=0.100.0\n",
+        encoding="utf-8",
+    )
+
+    # Mock PyPI to return OK for requests/fastapi, and HIGH_RISK for fake-ai-hallucinated-package-xyz
+    def mock_query(pkg, *args, **kwargs):
+        if pkg in ("requests", "fastapi"):
+            return ("OK", 5000, "2011-02-14", "Established package")
+        return ("HIGH_RISK", None, None, "Package does NOT exist on PyPI (HTTP 404)")
+
+    with patch("deployproof.dependencies.query_pypi_registry", side_effect=mock_query):
+        exit_code = main(["check", "--files", str(req_txt)])
+        captured = capsys.readouterr()
+
+        assert "[1] fake-ai-hallucinated-package-xyz [HIGH_RISK]" in captured.out
+        assert "Classification: HIGH RISK (Package does NOT exist on PyPI)" in captured.out
+        assert exit_code == 1
+
+
+def test_cli_dynamic_importlib_hallucinated_package_detection(tmp_path: Path, capsys, monkeypatch):
+    """
+    Verify exact case from audit:
+    A file dynamically imports a hallucinated package name via importlib.import_module("pkg").
+    Confirm it's caught, classified as HIGH_RISK, and reported with '(dynamically imported)'.
+    """
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+
+    app_py = tmp_path / "app.py"
+    app_py.write_text(
+        "import importlib\n"
+        "def load():\n"
+        "    return importlib.import_module('ai-hallucinated-dynamic-tool-9999')\n",
+        encoding="utf-8",
+    )
+
+    def mock_query(pkg, *args, **kwargs):
+        return ("HIGH_RISK", None, None, "Package does NOT exist on PyPI (HTTP 404)")
+
+    with patch("deployproof.dependencies.query_pypi_registry", side_effect=mock_query):
+        exit_code = main(["check", "--files", str(app_py)])
+        captured = capsys.readouterr()
+
+        assert "[1] ai-hallucinated-dynamic-tool-9999 [HIGH_RISK]" in captured.out
+        assert "(dynamically imported)" in captured.out
+        assert exit_code == 1
+
+
+def test_cli_dynamic_import_non_literal_variable_warning(tmp_path: Path, capsys, monkeypatch):
+    """
+    Verify dynamic import with non-literal variable name is reported under unscanned sources.
+    """
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+
+    app_py = tmp_path / "app.py"
+    app_py.write_text(
+        "import importlib\n"
+        "def load_plugin(plugin_name):\n"
+        "    return importlib.import_module(plugin_name)\n",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["check", "--files", str(app_py)])
+    captured = capsys.readouterr()
+
+    assert "unscanned dependency source" in captured.out
+    assert "Dynamic import with non-literal name - cannot verify statically" in captured.out
+    # Non-literal dynamic import alone does not fail exit code
+    assert exit_code == 0
+
+
+

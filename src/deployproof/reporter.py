@@ -1,14 +1,296 @@
 """Terminal output reporter for DeployProof."""
 
+import json
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
+from deployproof.control_flow import ControlFlowScanSummary
 from deployproof.dependencies import DependencyScanSummary
+from deployproof.mocks import MockScanSummary
 from deployproof.mutator import MutationResult
 from deployproof.secrets import SecretsScanResult
 from deployproof.symlinks import SymlinkScanResult
 
 LARGE_FILE_LOC_THRESHOLD = 300
+
+
+def format_json_report(
+    result: MutationResult,
+    target_files: List[Path],
+    secrets_result: Optional[SecretsScanResult] = None,
+    symlink_result: Optional[SymlinkScanResult] = None,
+    dependency_result: Optional[DependencyScanSummary] = None,
+    mock_result: Optional[MockScanSummary] = None,
+    control_flow_result: Optional[ControlFlowScanSummary] = None,
+    strict_mocks: bool = False,
+    strict_error_handling: bool = False,
+    repo_root: Optional[Path] = None,
+    threshold: float = 80.0,
+    version: str = "0.1.5",
+) -> str:
+    """Format all scan findings and mutation results as a structured JSON string."""
+    root = (repo_root or Path.cwd()).resolve()
+
+    strict_mocks_triggered = bool(strict_mocks and mock_result and mock_result.total_findings > 0)
+    strict_error_triggered = bool(
+        strict_error_handling and control_flow_result and control_flow_result.total_findings > 0
+    )
+    has_security_failure = bool(
+        (secrets_result and secrets_result.findings)
+        or (symlink_result and symlink_result.escape_findings)
+        or (dependency_result and dependency_result.high_risk_count > 0)
+        or strict_mocks_triggered
+        or strict_error_triggered
+    )
+    is_passed = (
+        not has_security_failure
+        and not result.untested_files
+        and result.mutation_score >= threshold
+    )
+    status_str = "passed" if is_passed else "failed"
+
+    # Scope
+    scope_files = []
+    for f in target_files:
+        try:
+            rel = f.relative_to(root).as_posix()
+        except ValueError:
+            rel = f.as_posix()
+        try:
+            loc = len(f.read_text(encoding="utf-8", errors="replace").splitlines())
+        except Exception:
+            loc = 0
+        scope_files.append(
+            {
+                "file": rel,
+                "loc": loc,
+                "is_large": loc >= LARGE_FILE_LOC_THRESHOLD,
+            }
+        )
+
+    # Mutation testing findings
+    surviving_mutants_data = []
+    for m in result.survived_mutants:
+        try:
+            rel_f = m.file_path.relative_to(root).as_posix()
+        except ValueError:
+            rel_f = m.file_path.as_posix()
+        surviving_mutants_data.append(
+            {
+                "file": rel_f,
+                "line": m.line_number,
+                "description": m.description,
+                "original_code": m.original_line,
+                "mutated_code": m.mutated_line,
+            }
+        )
+
+    skipped_constructs_data = []
+    for s in result.skipped_constructs:
+        try:
+            rel_f = s.file_path.relative_to(root).as_posix()
+        except ValueError:
+            rel_f = s.file_path.as_posix()
+        skipped_constructs_data.append(
+            {
+                "file": rel_f,
+                "line": s.line_number,
+                "construct": s.construct_name,
+                "reason": s.reason,
+            }
+        )
+
+    untested_files_data = []
+    for u in result.untested_files:
+        try:
+            rel_f = u.relative_to(root).as_posix()
+        except ValueError:
+            rel_f = u.as_posix()
+        untested_files_data.append(rel_f)
+
+    # Secrets
+    secrets_findings_data = []
+    if secrets_result and secrets_result.findings:
+        for f in secrets_result.findings:
+            try:
+                rel_f = f.file_path.relative_to(root).as_posix()
+            except ValueError:
+                rel_f = f.file_path.as_posix()
+            secrets_findings_data.append(
+                {
+                    "file": rel_f,
+                    "line": f.line_number,
+                    "rule": f.rule_name,
+                    "severity": "HIGH",
+                    "redacted_value": f.redacted_value,
+                    "snippet": f.snippet,
+                    "message": f.description,
+                }
+            )
+
+    # Symlinks
+    symlink_escapes_data = []
+    if symlink_result and symlink_result.escape_findings:
+        for f in symlink_result.escape_findings:
+            try:
+                rel_f = f.symlink_path.relative_to(root).as_posix()
+            except ValueError:
+                rel_f = f.symlink_path.as_posix()
+            symlink_escapes_data.append(
+                {
+                    "file": rel_f,
+                    "target_raw": f.link_target_raw,
+                    "resolved_target": str(f.resolved_target),
+                    "target_exists": f.target_exists,
+                    "severity": "CRITICAL",
+                    "message": f.description,
+                }
+            )
+
+    # Dependencies
+    dep_findings_data = []
+    unscanned_sources_data = []
+    if dependency_result and dependency_result.findings:
+        for f in dependency_result.findings:
+            try:
+                rel_f = f.source_file.relative_to(root).as_posix()
+            except ValueError:
+                rel_f = f.source_file.as_posix()
+
+            if f.status in ("HIGH_RISK", "MEDIUM_RISK", "UNKNOWN"):
+                dep_findings_data.append(
+                    {
+                        "package": f.package_name,
+                        "import_name": f.import_name,
+                        "file": rel_f,
+                        "line": f.lineno,
+                        "source_type": f.source_type,
+                        "status": f.status,
+                        "severity": (
+                            "HIGH"
+                            if f.status == "HIGH_RISK"
+                            else ("MEDIUM" if f.status == "MEDIUM_RISK" else "UNKNOWN")
+                        ),
+                        "age_days": f.age_days,
+                        "first_release_date": f.first_release_date,
+                        "message": f.details,
+                    }
+                )
+            elif f.status == "UNSCANNED":
+                unscanned_sources_data.append(
+                    {
+                        "source": f.import_name,
+                        "file": rel_f,
+                        "line": f.lineno,
+                        "source_type": f.source_type,
+                        "reason": f.details,
+                    }
+                )
+
+    # Mocks
+    mock_findings_data = []
+    if mock_result and mock_result.findings:
+        for f in mock_result.findings:
+            try:
+                rel_f = f.file_path.relative_to(root).as_posix()
+            except ValueError:
+                rel_f = f.file_path.as_posix()
+            mock_findings_data.append(
+                {
+                    "file": rel_f,
+                    "line": f.line_number,
+                    "mock_type": f.mock_type,
+                    "what": f.description,
+                    "code": f.snippet,
+                    "message": f"Newly added mock usage detected in diff: {f.description}",
+                }
+            )
+
+    # Control Flow & Error Handling
+    control_flow_findings_data = []
+    if control_flow_result and control_flow_result.findings:
+        for f in control_flow_result.findings:
+            try:
+                rel_f = f.file_path.relative_to(root).as_posix()
+            except ValueError:
+                rel_f = f.file_path.as_posix()
+            control_flow_findings_data.append(
+                {
+                    "file": rel_f,
+                    "line": f.line_number,
+                    "rule": f.rule_id,
+                    "severity": f.severity,
+                    "snippet": f.snippet,
+                    "message": f.message,
+                }
+            )
+
+    data: Dict[str, Any] = {
+        "version": version,
+        "status": status_str,
+        "summary": {
+            "target_files_count": len(target_files),
+            "mutation_score": result.mutation_score,
+            "threshold": threshold,
+            "secrets_found": len(secrets_findings_data),
+            "symlink_escapes_found": len(symlink_escapes_data),
+            "dependency_findings": {
+                "high_risk": dependency_result.high_risk_count if dependency_result else 0,
+                "medium_risk": dependency_result.medium_risk_count if dependency_result else 0,
+                "ok": dependency_result.ok_count if dependency_result else 0,
+                "unknown": dependency_result.unknown_count if dependency_result else 0,
+                "unscanned": len(unscanned_sources_data),
+            },
+            "mock_usages_found": len(mock_findings_data),
+            "control_flow_findings": len(control_flow_findings_data),
+            "strict_mocks_active": strict_mocks,
+            "strict_mocks_triggered": strict_mocks_triggered,
+            "strict_error_handling_active": strict_error_handling,
+            "strict_error_handling_triggered": strict_error_triggered,
+        },
+        "scope": {
+            "target_files": scope_files,
+        },
+        "mutation_testing": {
+            "score": result.mutation_score,
+            "threshold": threshold,
+            "total_mutants": result.total_mutants,
+            "killed_mutants": result.killed_mutants,
+            "survived_mutants_count": len(surviving_mutants_data),
+            "duration_seconds": result.duration_seconds,
+            "surviving_mutants": surviving_mutants_data,
+            "skipped_constructs": skipped_constructs_data,
+            "untested_files": untested_files_data,
+        },
+        "secrets": {
+            "clean": len(secrets_findings_data) == 0,
+            "files_scanned": secrets_result.files_scanned if secrets_result else len(target_files),
+            "findings": secrets_findings_data,
+        },
+        "symlinks": {
+            "clean": len(symlink_escapes_data) == 0,
+            "files_scanned": symlink_result.files_scanned if symlink_result else len(target_files),
+            "findings": symlink_escapes_data,
+        },
+        "dependencies": {
+            "clean": bool(not dep_findings_data),
+            "total_scanned": dependency_result.total_scanned if dependency_result else 0,
+            "findings": dep_findings_data,
+            "unscanned_sources": unscanned_sources_data,
+        },
+        "mocks": {
+            "clean": len(mock_findings_data) == 0,
+            "strict_gate_triggered": strict_mocks_triggered,
+            "findings": mock_findings_data,
+        },
+        "control_flow": {
+            "clean": len(control_flow_findings_data) == 0,
+            "strict_gate_triggered": strict_error_triggered,
+            "findings": control_flow_findings_data,
+        },
+    }
+
+    return json.dumps(data, indent=2)
 
 
 def format_report(
@@ -17,6 +299,10 @@ def format_report(
     secrets_result: Optional[SecretsScanResult] = None,
     symlink_result: Optional[SymlinkScanResult] = None,
     dependency_result: Optional[DependencyScanSummary] = None,
+    mock_result: Optional[MockScanSummary] = None,
+    control_flow_result: Optional[ControlFlowScanSummary] = None,
+    strict_mocks: bool = False,
+    strict_error_handling: bool = False,
     repo_root: Optional[Path] = None,
     threshold: float = 80.0,
 ) -> str:
@@ -165,6 +451,54 @@ def format_report(
                 src_str = f"{rel_src}:{finding.lineno}" if finding.lineno else str(rel_src)
                 lines.append(f"    * {finding.import_name} (Source: {src_str}) - {finding.details}")
 
+    # Mock Usage Introduced section
+    lines.append("\nMock Usage Introduced (flagged for review):")
+    if mock_result and mock_result.total_findings > 0:
+        warning_label = "[!] STRICT GATE TRIGGERED:" if strict_mocks else "[*] Notice:"
+        lines.append(
+            f"  {warning_label} {mock_result.total_findings} newly added mock/stub usage{'s' if mock_result.total_findings != 1 else ''} detected:"
+        )
+        for idx, finding in enumerate(mock_result.findings, 1):
+            try:
+                rel_path = finding.file_path.relative_to(root)
+            except ValueError:
+                rel_path = finding.file_path
+            lines.append(f"\n    [{idx}] {rel_path}:{finding.line_number} [{finding.mock_type}]")
+            lines.append(f"        What: {finding.description}")
+            if finding.snippet:
+                lines.append(f"        Code: {finding.snippet}")
+    else:
+        test_scanned = len(mock_result.files_scanned) if mock_result else 0
+        if test_scanned > 0:
+            lines.append(
+                f"  Clean: No new mocks, monkeypatches, or stub fixtures introduced across {test_scanned} session test file{'s' if test_scanned != 1 else ''}."
+            )
+        else:
+            lines.append("  Clean: No modified test files in scope.")
+
+    # Control Flow & Error Handling section
+    lines.append("\nControl Flow & Error Handling (flagged for review):")
+    if control_flow_result and control_flow_result.total_findings > 0:
+        warning_label = "[!] STRICT GATE TRIGGERED:" if strict_error_handling else "[*] Notice:"
+        lines.append(
+            f"  {warning_label} {control_flow_result.total_findings} control flow / error handling issue{'s' if control_flow_result.total_findings != 1 else ''} detected:"
+        )
+        for idx, finding in enumerate(control_flow_result.findings, 1):
+            try:
+                rel_path = finding.file_path.relative_to(root)
+            except ValueError:
+                rel_path = finding.file_path
+            lines.append(f"\n    [{idx}] {rel_path}:{finding.line_number} [{finding.rule_id}]")
+            lines.append(f"        Severity: {finding.severity}")
+            lines.append(f"        Note:     {finding.message}")
+            if finding.snippet:
+                lines.append(f"        Snippet:  {finding.snippet}")
+    else:
+        cf_scanned = len(control_flow_result.files_scanned) if control_flow_result else file_count
+        lines.append(
+            f"  Clean: No bare excepts, swallowed exceptions, or unreachable code detected across {cf_scanned} session file{'s' if cf_scanned != 1 else ''}."
+        )
+
     # Score section
     lines.append("\nLocal Pre-Check Mutation Verification:")
     if result.total_mutants == 0:
@@ -258,6 +592,14 @@ def format_report(
     elif dependency_result and dependency_result.high_risk_count > 0:
         lines.append(
             f"SECURITY ALERT: {dependency_result.high_risk_count} non-existent / hallucinated package(s) detected. Fix imports before pushing."
+        )
+    elif strict_mocks and mock_result and mock_result.total_findings > 0:
+        lines.append(
+            f"Pre-check FAILED: {mock_result.total_findings} newly introduced mock(s) detected (--strict-mocks active)."
+        )
+    elif strict_error_handling and control_flow_result and control_flow_result.total_findings > 0:
+        lines.append(
+            f"Pre-check FAILED: {control_flow_result.total_findings} control flow / error handling issue(s) detected (--strict-error-handling active)."
         )
     elif result.untested_files:
         lines.append(

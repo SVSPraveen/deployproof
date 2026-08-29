@@ -88,6 +88,43 @@ class SkippedConstructCollector(ast.NodeVisitor):
         self._record_skip(node, 'Yield From Statement', 'Generator yield from statement semantics not mutated by Tier 1')
         self.generic_visit(node)
 
+def is_log_or_print_call(call: ast.Call) -> bool:
+    """Check if an AST Call node is a call to logging, logger, or print."""
+    if isinstance(call.func, ast.Name):
+        if call.func.id in (
+            "print",
+            "log",
+            "debug",
+            "info",
+            "warn",
+            "warning",
+            "error",
+            "critical",
+            "exception",
+        ):
+            return True
+    elif isinstance(call.func, ast.Attribute):
+        attr_name = call.func.attr.lower()
+        if attr_name in (
+            "debug",
+            "info",
+            "warn",
+            "warning",
+            "error",
+            "critical",
+            "exception",
+            "log",
+        ):
+            return True
+        if isinstance(call.func.value, ast.Name) and call.func.value.id.lower() in (
+            "logging",
+            "logger",
+            "log",
+        ):
+            return True
+    return False
+
+
 class MutationCounter(ast.NodeVisitor):
     """Count number of mutable locations in an AST, excluding type annotations."""
 
@@ -126,6 +163,25 @@ class MutationCounter(ast.NodeVisitor):
     def visit_arg(self, node: ast.arg) -> None:
         pass
 
+    def visit_Call(self, node: ast.Call) -> None:
+        if is_log_or_print_call(node):
+            # Exclude string literals and formatting inside logging and print statements
+            return
+        self.generic_visit(node)
+
+    def visit_Raise(self, node: ast.Raise) -> None:
+        # Exclude exception message strings from mutation
+        if isinstance(node.exc, ast.Call):
+            for arg in node.exc.args:
+                if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)) and not (
+                    isinstance(arg, ast.BinOp) and isinstance(arg.op, (ast.Add, ast.Mod))
+                ):
+                    self.visit(arg)
+            if node.cause:
+                self.visit(node.cause)
+            return
+        self.generic_visit(node)
+
     def visit_Compare(self, node: ast.Compare) -> None:
         for op in node.ops:
             if type(op) in COMPARE_MAP:
@@ -153,6 +209,7 @@ class MutationCounter(ast.NodeVisitor):
         elif isinstance(node.value, (int, float)) and (not isinstance(node.value, bool)):
             self.count += 1
         self.generic_visit(node)
+
 
 class MutationTransformer(ast.NodeTransformer):
     """Applies a single mutation at the specified index, excluding type annotations."""
@@ -184,6 +241,29 @@ class MutationTransformer(ast.NodeTransformer):
 
     def visit_arg(self, node: ast.arg) -> ast.AST:
         return node
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        if is_log_or_print_call(node):
+            # Exclude string literals and formatting inside logging and print statements
+            return node
+        return self.generic_visit(node)
+
+    def visit_Raise(self, node: ast.Raise) -> ast.AST:
+        # Exclude exception message strings from mutation
+        if isinstance(node.exc, ast.Call):
+            new_args = []
+            for arg in node.exc.args:
+                if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)) and not (
+                    isinstance(arg, ast.BinOp) and isinstance(arg.op, (ast.Add, ast.Mod))
+                ):
+                    new_args.append(self.visit(arg))
+                else:
+                    new_args.append(arg)
+            node.exc.args = new_args
+            if node.cause:
+                node.cause = self.visit(node.cause)
+            return node
+        return self.generic_visit(node)
 
     def visit_Compare(self, node: ast.Compare) -> ast.AST:
         self.generic_visit(node)

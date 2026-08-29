@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deployproof"
-version = "0.1.2"
-description = "A deterministic pre-push verification tool that catches untested AI code, leaked credentials, sandbox escapes, and hallucinated packages before you ship."
+version = "0.1.5"
+description = "A deterministic AI-code deployability checker that catches what coverage misses."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"

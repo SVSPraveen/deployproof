@@ -90,39 +90,71 @@ import hallucinated_pkg_12345
     assert "hallucinated_pkg_12345" in extracted_names
 
 
-def test_extract_manifest_requirements_txt(tmp_path: Path):
+def test_nested_requirements_txt_include_resolution(tmp_path: Path):
+    """Verify -r includes are resolved and parsed recursively."""
     root = tmp_path / "mock_repo"
     root.mkdir()
-    req_file = root / "requirements.txt"
-    req_file.write_text(
-        """
-# Dependencies
-requests>=2.31.0
-pytest==8.0.0
-scikit-learn~=1.4.0
--r other-requirements.txt
-git+https://github.com/psf/requests.git@main#egg=requests
-# comment line
-hallucinated-tool-xyz
-""",
+    req_dir = root / "requirements"
+    req_dir.mkdir()
+
+    base_file = req_dir / "base.txt"
+    base_file.write_text(
+        "requests>=2.31.0\n"
+        "fake-hallucinated-ai-pkg==1.0.0\n",
+        encoding="utf-8",
+    )
+
+    main_file = root / "requirements.txt"
+    main_file.write_text(
+        "-r requirements/base.txt\n"
+        "fastapi>=0.100.0\n",
         encoding="utf-8",
     )
 
     local_modules = get_local_module_names(root)
-    extracted = extract_new_manifest_dependencies(req_file, root, local_modules)
+    extracted = extract_new_manifest_dependencies(main_file, root, local_modules)
     extracted_names = [d.name for d in extracted]
 
+    # Both base.txt packages and main_file packages should be extracted
     assert "requests" in extracted_names
-    assert "pytest" in extracted_names
-    assert "scikit-learn" in extracted_names
-    assert "hallucinated-tool-xyz" in extracted_names
-    assert "-r other-requirements.txt" in extracted_names
-    assert "git+https://github.com/psf/requests.git@main#egg=requests" in extracted_names
+    assert "fake-hallucinated-ai-pkg" in extracted_names
+    assert "fastapi" in extracted_names
 
+    # Check source file pointers
+    fake_dep = next(d for d in extracted if d.name == "fake-hallucinated-ai-pkg")
+    assert fake_dep.source_file == base_file
+    assert fake_dep.lineno == 2
+
+
+def test_circular_requirements_txt_include_resolution(tmp_path: Path):
+    """Verify circular requirements includes do not crash or hang in infinite loop."""
+    root = tmp_path / "mock_repo"
+    root.mkdir()
+
+    req_a = root / "requirements_a.txt"
+    req_b = root / "requirements_b.txt"
+
+    req_a.write_text(
+        "-r requirements_b.txt\n"
+        "package-alpha>=1.0.0\n",
+        encoding="utf-8",
+    )
+    req_b.write_text(
+        "-r requirements_a.txt\n"
+        "package-beta>=2.0.0\n",
+        encoding="utf-8",
+    )
+
+    local_modules = get_local_module_names(root)
+    extracted = extract_new_manifest_dependencies(req_a, root, local_modules)
+    extracted_names = [d.name for d in extracted]
+
+    assert "package-alpha" in extracted_names
+    assert "package-beta" in extracted_names
+    # Circular include is recorded as unscanned without crashing
     unscanned = [d for d in extracted if d.unscanned_reason]
-    assert len(unscanned) == 2
-    assert any("-r" in d.unscanned_reason for d in unscanned)
-    assert any("VCS" in d.unscanned_reason for d in unscanned)
+    assert len(unscanned) == 1
+    assert "Circular" in unscanned[0].unscanned_reason
 
 
 def test_extract_manifest_pyproject_toml(tmp_path: Path):
@@ -200,4 +232,69 @@ def existing_fn():
     # Newly added external imports 'httpx' and 'pydantic' SHOULD be extracted
     assert "httpx" in extracted_names
     assert "pydantic" in extracted_names
+
+
+def test_dynamic_importlib_and_dunder_import_extraction(tmp_path: Path):
+    """Verify importlib.import_module and __import__ string literal calls are extracted as dynamically imported."""
+    root = tmp_path / "mock_repo"
+    root.mkdir()
+
+    app_py = root / "plugin_loader.py"
+    app_py.write_text(
+        """import importlib
+from importlib import import_module
+
+def load_plugins():
+    mod1 = importlib.import_module("fake_dynamic_plugin_alpha")
+    mod2 = import_module("fake_dynamic_plugin_beta.submod")
+    mod3 = __import__("fake_dynamic_plugin_gamma")
+    # Stdlib dynamic imports should be ignored
+    mod_sys = importlib.import_module("sys")
+    mod_os = __import__("os")
+    return mod1, mod2, mod3
+""",
+        encoding="utf-8",
+    )
+
+    local_modules = get_local_module_names(root)
+    extracted = extract_new_imports_from_py_file(app_py, root=root, local_modules=local_modules)
+
+    extracted_names = [d.name for d in extracted]
+    assert "fake_dynamic_plugin_alpha" in extracted_names
+    assert "fake_dynamic_plugin_beta" in extracted_names
+    assert "fake_dynamic_plugin_gamma" in extracted_names
+
+    # Stdlib should NOT be present
+    assert "sys" not in extracted_names
+    assert "os" not in extracted_names
+
+    # Verify source_type
+    for d in extracted:
+        assert d.source_type == "dynamically imported"
+
+
+def test_dynamic_import_non_literal_argument_unscanned(tmp_path: Path):
+    """Verify dynamic imports with non-literal arguments are safely recorded as unscanned without crashing."""
+    root = tmp_path / "mock_repo"
+    root.mkdir()
+
+    app_py = root / "dynamic_runner.py"
+    app_py.write_text(
+        """import importlib
+
+def run_dynamic(plugin_name):
+    mod = importlib.import_module(plugin_name)
+    mod2 = __import__(plugin_name + "_ext")
+    return mod
+""",
+        encoding="utf-8",
+    )
+
+    local_modules = get_local_module_names(root)
+    extracted = extract_new_imports_from_py_file(app_py, root=root, local_modules=local_modules)
+
+    unscanned = [d for d in extracted if d.unscanned_reason]
+    assert len(unscanned) == 2
+    assert all("Dynamic import with non-literal name" in d.unscanned_reason for d in unscanned)
+
 

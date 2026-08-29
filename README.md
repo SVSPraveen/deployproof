@@ -4,7 +4,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/deployproof.svg?color=blue)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/pypi/pyversions/deployproof.svg?color=blue)](https://pypi.org/project/deployproof/)
-[![Tests](https://img.shields.io/badge/tests-61%20passed-brightgreen.svg)](https://github.com/SVSPraveen/DeployProof)
+[![Tests](https://img.shields.io/badge/tests-79%20passed-brightgreen.svg)](https://github.com/SVSPraveen/DeployProof)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
@@ -35,14 +35,99 @@ Run all verification checks against changes in the current session:
 deployproof check
 ```
 
-Output includes a section for each check — symlink scan, secrets scan, dependency scan, and mutation score — with a pass/fail line at the bottom. Exit code is non-zero on any finding that should block a push.
+Output includes a section for each check — symlink scan, secrets scan, dependency scan, mock detection, control flow analysis, and mutation score — with a pass/fail line at the bottom. Exit code is non-zero on any finding that should block a push. Supports `--json` for machine-readable output and `--strict-mocks` / `--strict-error-handling` to turn informational checks into hard verification gates.
+
+### Machine-Readable Output (`--json`)
+
+DeployProof provides a stable structured JSON schema for CI/CD pipelines, IDEs, and automation:
+
+```bash
+deployproof check --json
+```
+
+#### JSON Output Schema
+
+```json
+{
+  "version": "0.1.5",
+  "status": "passed",
+  "summary": {
+    "target_files_count": 1,
+    "mutation_score": 100.0,
+    "threshold": 80.0,
+    "secrets_found": 0,
+    "symlink_escapes_found": 0,
+    "dependency_findings": {
+      "high_risk": 0,
+      "medium_risk": 0,
+      "ok": 1,
+      "unknown": 0,
+      "unscanned": 0
+    },
+    "mock_usages_found": 0,
+    "control_flow_findings": 0,
+    "strict_mocks_active": false,
+    "strict_mocks_triggered": false,
+    "strict_error_handling_active": false,
+    "strict_error_handling_triggered": false
+  },
+  "scope": {
+    "target_files": [
+      {
+        "file": "app.py",
+        "loc": 45,
+        "is_large": false
+      }
+    ]
+  },
+  "mutation_testing": {
+    "score": 100.0,
+    "threshold": 80.0,
+    "total_mutants": 6,
+    "killed_mutants": 6,
+    "survived_mutants_count": 0,
+    "duration_seconds": 1.2,
+    "surviving_mutants": [],
+    "skipped_constructs": [],
+    "untested_files": []
+  },
+  "secrets": {
+    "clean": true,
+    "files_scanned": 1,
+    "findings": []
+  },
+  "symlinks": {
+    "clean": true,
+    "files_scanned": 1,
+    "findings": []
+  },
+  "dependencies": {
+    "clean": true,
+    "total_scanned": 1,
+    "findings": [],
+    "unscanned_sources": []
+  },
+  "mocks": {
+    "clean": true,
+    "strict_gate_triggered": false,
+    "findings": []
+  },
+  "control_flow": {
+    "clean": true,
+    "strict_gate_triggered": false,
+    "findings": []
+  }
+}
+```
 
 ## What It Checks
 
 - **Mutation Score** — Mutates AST operators (`>=`, `==`, `and`, `or`, `*`, numeric constants, comparisons) in modified files and runs your test suite against each mutant. Reports surviving mutants and a percentage score. Does not use line coverage.
 - **Secrets and Credentials** — Scans modified files for hardcoded API keys (OpenAI, Anthropic, AWS, GitHub, Stripe, private keys) and tracked `.env` files using pattern matching and entropy analysis.
 - **Symlink and Sandbox Escape** — Resolves symbolic links and flags any whose target escapes the repository root (CWE-61 / CWE-451). Catches the class of path-traversal trick used in the GhostApproval disclosure (Wiz Research, July 2026).
-- **Dependency and Slopsquatting** — For each new import or manifest entry introduced in the diff, queries the PyPI JSON API and checks registration age. Packages that don't exist (HTTP 404) are flagged HIGH RISK; packages registered within the last 30 days are flagged MEDIUM RISK. Network errors are reported as UNKNOWN — never silently treated as safe.
+- **Dependency and Slopsquatting** — For each new import, dynamic import (`importlib.import_module`, `__import__`), or manifest entry (including recursive `-r` includes) introduced in the diff, queries the PyPI JSON API and checks registration age. Packages that don't exist (HTTP 404) are flagged HIGH RISK; packages registered within the last 30 days are flagged MEDIUM RISK.
+- **Mock Usage Detection** — Scans test diffs for newly introduced imports or fixture uses of `unittest.mock`, `mocker`, and `monkeypatch`, flagging them for human review with an optional `--strict-mocks` hard gate.
+- **Control Flow and Error Handling** — AST-based detector for bare `except:` without re-raise, silently swallowed broad exceptions (`except Exception:` that only `pass` or log/print without re-raising or returning error indicators), and dead/unreachable code following unconditional `return`, `raise`, `break`, or `continue`, with an optional `--strict-error-handling` hard gate.
 
 ## What This Doesn't Do
 
@@ -63,7 +148,7 @@ Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS cr
 
 ## Status & Roadmap
 
-- **Current (v0.1.2):** Diff-scoped AST mutation testing, secrets scanner, GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner, and Tier 2 CI verification via GitHub Actions (mutmut).
+- **Current (v0.1.5):** Diff-scoped AST mutation testing, secrets scanner (including unquoted .env values), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with recursive `-r` requirements scanning and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
 - **Next:** Multi-language mutation support and expanded ecosystem rule packs.
 
 ## Contributing

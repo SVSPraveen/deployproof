@@ -232,3 +232,56 @@ def resolve_changed_python_files(
         py_files = [p for p in py_files if not is_test_file(p)]
 
     return sorted(py_files)
+
+
+def get_modified_line_ranges(
+    file_path: Path,
+    root: Path,
+    base: Optional[str] = None,
+) -> Optional[Set[int]]:
+    """
+    Get the set of line numbers (1-indexed) in file_path that were added or modified in the current diff.
+    
+    Returns None if the file is newly untracked, newly added, or if diffing fails (meaning all lines are new).
+    """
+    try:
+        rel_path = file_path.relative_to(root).as_posix()
+    except ValueError:
+        rel_path = str(file_path)
+
+    if not is_git_repo(root) or not has_commits(root):
+        return None
+
+    # Check if file is untracked or newly added
+    res_status = run_git(["status", "--porcelain", "--", rel_path], root)
+    if res_status.returncode == 0:
+        stdout_s = res_status.stdout.strip()
+        if stdout_s.startswith("??") or stdout_s.startswith("A ") or stdout_s.startswith("AM"):
+            return None
+
+    args = ["diff", "-U0"]
+    if base:
+        args.append(base)
+    else:
+        args.append("HEAD")
+    args.extend(["--", rel_path])
+
+    res = run_git(args, root)
+    if res.returncode != 0:
+        return None
+
+    import re
+    # Match @@ -old_start[,old_count] +new_start[,new_count] @@
+    hunk_pattern = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+    modified_lines: Set[int] = set()
+
+    for line in res.stdout.splitlines():
+        m = hunk_pattern.match(line)
+        if m:
+            start = int(m.group(1))
+            count = int(m.group(2)) if m.group(2) is not None else 1
+            for l in range(start, start + count):
+                modified_lines.add(l)
+
+    return modified_lines
+

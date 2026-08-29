@@ -479,28 +479,90 @@ def extract_new_imports_from_py_file(
                     )
                 )
 
+        elif isinstance(node, ast.Call):
+            if added_linenos is not None and node.lineno not in added_linenos:
+                continue
+
+            is_importlib = False
+            is_dunder_import = False
+
+            if isinstance(node.func, ast.Attribute):
+                if node.func.attr == "import_module":
+                    if isinstance(node.func.value, ast.Name) and node.func.value.id == "importlib":
+                        is_importlib = True
+                    elif isinstance(node.func.value, ast.Attribute) and node.func.value.attr == "importlib":
+                        is_importlib = True
+            elif isinstance(node.func, ast.Name):
+                if node.func.id == "import_module":
+                    is_importlib = True
+                elif node.func.id == "__import__":
+                    is_dunder_import = True
+
+            if is_importlib or is_dunder_import:
+                call_label = "importlib.import_module" if is_importlib else "__import__"
+                if not node.args:
+                    continue
+
+                first_arg = node.args[0]
+                if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+                    raw_mod_name = first_arg.value.strip()
+                    top_name = raw_mod_name.split(".")[0]
+                    if not top_name or top_name in STDLIB_MODULES or top_name in local_modules:
+                        continue
+
+                    pypi_name = normalize_package_name(top_name)
+                    key = f"{pypi_name}:{node.lineno}:dynamic"
+                    if key not in seen:
+                        seen.add(key)
+                        extracted.append(
+                            ExtractedDependency(
+                                name=pypi_name,
+                                import_name=raw_mod_name,
+                                source_file=file_path,
+                                lineno=node.lineno,
+                                source_type="dynamically imported",
+                            )
+                        )
+                else:
+                    # Non-literal argument, e.g. importlib.import_module(var)
+                    key = f"unscanned_dynamic:{node.lineno}"
+                    if key not in seen:
+                        seen.add(key)
+                        extracted.append(
+                            ExtractedDependency(
+                                name=f"{call_label}(...)",
+                                import_name=f"{call_label}(...)",
+                                source_file=file_path,
+                                lineno=node.lineno,
+                                source_type="dynamically imported",
+                                unscanned_reason="Dynamic import with non-literal name - cannot verify statically",
+                            )
+                        )
+
     return extracted
 
 
-def extract_new_manifest_dependencies(
+MAX_INCLUDE_DEPTH = 5
+
+
+def _parse_requirements_file(
     file_path: Path,
     root: Path,
     local_modules: Set[str],
-    base: Optional[str] = None,
+    added_linenos: Optional[Set[int]] = None,
+    visited_files: Optional[Set[Path]] = None,
+    depth: int = 0,
 ) -> List[ExtractedDependency]:
-    """
-    Extract newly added dependencies from manifest files (requirements.txt, pyproject.toml, setup.py).
-    """
-    if not file_path.is_file():
+    """Parse a requirements.txt file and follow -r/--requirement includes recursively."""
+    if visited_files is None:
+        visited_files = set()
+
+    canonical_path = file_path.resolve()
+    if canonical_path in visited_files or depth > MAX_INCLUDE_DEPTH:
         return []
+    visited_files.add(canonical_path)
 
-    name = file_path.name.lower()
-    is_requirements = name.startswith("requirements") and name.endswith(".txt")
-    is_pyproject = name == "pyproject.toml"
-    is_setup_py = name == "setup.py"
-    is_setup_cfg = name == "setup.cfg"
-
-    if not (is_requirements or is_pyproject or is_setup_py or is_setup_cfg):
+    if not file_path.is_file():
         return []
 
     try:
@@ -508,11 +570,164 @@ def extract_new_manifest_dependencies(
     except Exception:
         return []
 
-    added_linenos = get_added_linenos_for_file(file_path, root, base=base)
     extracted: List[ExtractedDependency] = []
     lines = content.splitlines()
-
     req_name_re = re.compile(r"^\s*([A-Za-z0-9_\-\.]+)(?:[>=<!~;\[\s]|$)")
+
+    for idx, line in enumerate(lines, start=1):
+        raw_line = line.strip()
+        if not raw_line or raw_line.startswith("#"):
+            continue
+
+        if added_linenos is not None and idx not in added_linenos:
+            continue
+
+        # Handle -r / --requirement includes
+        if raw_line.startswith(("-r ", "-r=", "--requirement ", "--requirement=")):
+            if raw_line.startswith(("-r ", "-r=")):
+                include_target_raw = raw_line[3:].strip().strip("\"'")
+            else:
+                include_target_raw = raw_line[14:].strip().strip("\"'")
+
+            nested_file = (file_path.parent / include_target_raw).resolve()
+            if nested_file.is_file() and nested_file not in visited_files and depth < MAX_INCLUDE_DEPTH:
+                # Recursively parse nested requirements file (all lines in included file are evaluated)
+                nested_deps = _parse_requirements_file(
+                    file_path=nested_file,
+                    root=root,
+                    local_modules=local_modules,
+                    added_linenos=None,
+                    visited_files=visited_files,
+                    depth=depth + 1,
+                )
+                extracted.extend(nested_deps)
+            else:
+                if not nested_file.is_file():
+                    reason = f"External requirements file include not found ({include_target_raw}) - seen, not checked"
+                elif nested_file in visited_files:
+                    reason = f"Circular requirements file include ({include_target_raw}) - seen, not checked"
+                else:
+                    reason = f"External requirements file include depth limit exceeded ({include_target_raw}) - seen, not checked"
+                try:
+                    rel_source_type = file_path.relative_to(root).as_posix()
+                except ValueError:
+                    rel_source_type = file_path.name
+                extracted.append(
+                    ExtractedDependency(
+                        name=raw_line,
+                        import_name=raw_line,
+                        source_file=file_path,
+                        lineno=idx,
+                        source_type=rel_source_type,
+                        unscanned_reason=reason,
+                    )
+                )
+            continue
+
+        # Handle VCS lines (git+, hg+, svn+, bzr+) and direct URLs
+        if any(
+            raw_line.startswith(prefix)
+            for prefix in (
+                "git+",
+                "hg+",
+                "svn+",
+                "bzr+",
+                "-e git+",
+                "-e hg+",
+                "-e svn+",
+                "-e bzr+",
+                "http://",
+                "https://",
+                "-e http://",
+                "-e https://",
+            )
+        ):
+            try:
+                rel_source_type = file_path.relative_to(root).as_posix()
+            except ValueError:
+                rel_source_type = file_path.name
+            extracted.append(
+                ExtractedDependency(
+                    name=raw_line,
+                    import_name=raw_line,
+                    source_file=file_path,
+                    lineno=idx,
+                    source_type=rel_source_type,
+                    unscanned_reason="VCS / direct URL dependency - seen, not checked",
+                )
+            )
+            continue
+
+        # Other pip flags like -i, -f, --extra-index-url, --find-links
+        if raw_line.startswith(("-f ", "-i ", "--", "-e ")):
+            continue
+
+        m = req_name_re.match(raw_line)
+        if m:
+            pkg_name = m.group(1).strip()
+            if pkg_name not in STDLIB_MODULES and pkg_name not in local_modules:
+                try:
+                    rel_source_type = file_path.relative_to(root).as_posix()
+                except ValueError:
+                    rel_source_type = file_path.name
+                extracted.append(
+                    ExtractedDependency(
+                        name=normalize_package_name(pkg_name),
+                        import_name=pkg_name,
+                        source_file=file_path,
+                        lineno=idx,
+                        source_type=rel_source_type,
+                    )
+                )
+
+    return extracted
+
+
+def extract_new_manifest_dependencies(
+    file_path: Path,
+    root: Path,
+    local_modules: Optional[Set[str]] = None,
+    base: Optional[str] = None,
+) -> List[ExtractedDependency]:
+    """
+    Extract external dependencies from modified manifest files (requirements.txt, pyproject.toml, etc.).
+    """
+    if local_modules is None:
+        local_modules = get_local_module_names(root)
+
+    name = file_path.name.lower()
+    is_requirements = (
+        name == "requirements.txt"
+        or name.endswith(".requirements.txt")
+        or name.startswith("requirements-")
+        or name.endswith("-requirements.txt")
+        or name.endswith(".in")
+        or file_path.suffix == ".txt"
+    )
+    is_pyproject = name == "pyproject.toml"
+    is_setup_py = name == "setup.py"
+    is_setup_cfg = name == "setup.cfg"
+
+    if not (is_requirements or is_pyproject or is_setup_py or is_setup_cfg):
+        return []
+
+    added_linenos = get_added_linenos_for_file(file_path, root, base=base)
+
+    if is_requirements:
+        return _parse_requirements_file(
+            file_path=file_path,
+            root=root,
+            local_modules=local_modules,
+            added_linenos=added_linenos,
+        )
+
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return []
+
+    extracted: List[ExtractedDependency] = []
+    lines = content.splitlines()
     dep_str_re = re.compile(r"""["']([A-Za-z0-9_\-\.]+)(?:[>=<!~;\[\s"']|$)""")
 
     in_dependency_section = False
@@ -522,59 +737,7 @@ def extract_new_manifest_dependencies(
         raw_line = line.strip()
         lower_line = raw_line.lower()
 
-        if is_requirements:
-            if added_linenos is not None and idx not in added_linenos:
-                continue
-            if not raw_line or raw_line.startswith("#"):
-                continue
-
-            # Handle -r / --requirement includes
-            if raw_line.startswith(("-r ", "--requirement ")):
-                extracted.append(
-                    ExtractedDependency(
-                        name=raw_line,
-                        import_name=raw_line,
-                        source_file=file_path,
-                        lineno=idx,
-                        source_type="requirements.txt",
-                        unscanned_reason="External requirements file include (-r) - seen, not checked",
-                    )
-                )
-                continue
-
-            # Handle VCS lines (git+, hg+, svn+, bzr+) and direct URLs
-            if any(raw_line.startswith(prefix) for prefix in ("git+", "hg+", "svn+", "bzr+", "-e git+", "-e hg+", "-e svn+", "-e bzr+", "http://", "https://", "-e http://", "-e https://")):
-                extracted.append(
-                    ExtractedDependency(
-                        name=raw_line,
-                        import_name=raw_line,
-                        source_file=file_path,
-                        lineno=idx,
-                        source_type="requirements.txt",
-                        unscanned_reason="VCS / direct URL dependency - seen, not checked",
-                    )
-                )
-                continue
-
-            # Other pip flags like -i, -f, --extra-index-url, --find-links
-            if raw_line.startswith(("-f ", "-i ", "--", "-e ")):
-                continue
-
-            m = req_name_re.match(raw_line)
-            if m:
-                pkg_name = m.group(1).strip()
-                if pkg_name not in STDLIB_MODULES and pkg_name not in local_modules:
-                    extracted.append(
-                        ExtractedDependency(
-                            name=normalize_package_name(pkg_name),
-                            import_name=pkg_name,
-                            source_file=file_path,
-                            lineno=idx,
-                            source_type="requirements.txt",
-                        )
-                    )
-
-        elif is_pyproject:
+        if is_pyproject:
             # Check section headers
             if raw_line.startswith("[") and raw_line.endswith("]"):
                 header = raw_line.strip("[]").strip().lower()
@@ -728,7 +891,7 @@ def query_pypi_registry(
     url = f"https://pypi.org/pypi/{norm_name}/json"
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "DeployProof/0.1.2 (https://github.com/SVSPraveen/DeployProof)"},
+        headers={"User-Agent": "DeployProof/0.1.5 (https://github.com/SVSPraveen/DeployProof)"},
     )
 
     try:
