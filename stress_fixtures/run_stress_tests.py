@@ -19,6 +19,8 @@ REPO_ROOT = FIXTURES_ROOT.parent.resolve()
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from deployproof.control_flow import scan_session_files_for_control_flow
+from deployproof.mocks import scan_session_files_for_mocks
 from deployproof.mutator import run_mutation_tests
 from deployproof.secrets import scan_session_files_for_secrets
 from deployproof.symlinks import inspect_symlink, scan_session_files_for_symlinks
@@ -217,6 +219,99 @@ def run_all_stress_tests() -> List[TestResult]:
             fixture_name="02_ghostapproval_escape",
             expectation="Flag GhostApproval sandbox escape",
             actual="CRITICAL: Sandbox escape detected (is_escape=True)",
+            passed=passed,
+            duration_seconds=round(dt, 2),
+        )
+    )
+
+    # -------------------------------------------------------------
+    # 8. CONTROL FLOW: Planted Bugs
+    # -------------------------------------------------------------
+    t0 = time.time()
+    cf_planted_dir = FIXTURES_ROOT / "control_flow" / "01_planted_bugs"
+    cf_planted_files = [cf_planted_dir / "pipeline_bugs.py"]
+    cf_planted_res = scan_session_files_for_control_flow(cf_planted_files, root=cf_planted_dir)
+    dt = time.time() - t0
+    rule_ids = {f.rule_id for f in cf_planted_res.findings}
+    passed = (
+        cf_planted_res.total_findings >= 3
+        and "bare_except" in rule_ids
+        and "swallowed_exception" in rule_ids
+        and "unreachable_code" in rule_ids
+    )
+    results.append(
+        TestResult(
+            category="Control Flow",
+            fixture_name="01_planted_bugs",
+            expectation="Catch bare except, swallowed exception, dead code",
+            actual=f"Caught {cf_planted_res.total_findings} bugs: {', '.join(sorted(rule_ids))}",
+            passed=passed,
+            duration_seconds=round(dt, 2),
+        )
+    )
+
+    # -------------------------------------------------------------
+    # 9. CONTROL FLOW: Clean Handlers
+    # -------------------------------------------------------------
+    t0 = time.time()
+    cf_clean_dir = FIXTURES_ROOT / "control_flow" / "02_clean_handlers"
+    cf_clean_files = [cf_clean_dir / "pipeline_clean.py"]
+    cf_clean_res = scan_session_files_for_control_flow(cf_clean_files, root=cf_clean_dir)
+    dt = time.time() - t0
+    passed = (cf_clean_res.total_findings == 0)
+    results.append(
+        TestResult(
+            category="Control Flow",
+            fixture_name="02_clean_handlers",
+            expectation="0 false positives on legitimate exception handling",
+            actual=f"Clean: 0 findings across {len(cf_clean_files)} files",
+            passed=passed,
+            duration_seconds=round(dt, 2),
+        )
+    )
+
+    # -------------------------------------------------------------
+    # 10. MOCK DETECTION: Planted Mock
+    # -------------------------------------------------------------
+    t0 = time.time()
+    mock_planted_dir = FIXTURES_ROOT / "mocks" / "01_planted_mock"
+    mock_planted_files = [
+        mock_planted_dir / "db_service.py",
+        mock_planted_dir / "tests" / "test_db_service.py",
+    ]
+    mock_planted_res = scan_session_files_for_mocks(mock_planted_files, root=mock_planted_dir)
+    dt = time.time() - t0
+    mock_types = {f.mock_type for f in mock_planted_res.findings}
+    passed = mock_planted_res.total_findings >= 1 and ("patch_decorator" in mock_types or "mock_import" in mock_types)
+    results.append(
+        TestResult(
+            category="Mock Detection",
+            fixture_name="01_planted_mock",
+            expectation="Flag mock masking broken DB implementation",
+            actual=f"Caught {mock_planted_res.total_findings} mock usages: {', '.join(sorted(mock_types))}",
+            passed=passed,
+            duration_seconds=round(dt, 2),
+        )
+    )
+
+    # -------------------------------------------------------------
+    # 11. MOCK DETECTION: Clean Tests
+    # -------------------------------------------------------------
+    t0 = time.time()
+    mock_clean_dir = FIXTURES_ROOT / "mocks" / "02_clean_tests"
+    mock_clean_files = [
+        mock_clean_dir / "calc_service.py",
+        mock_clean_dir / "tests" / "test_calc_service.py",
+    ]
+    mock_clean_res = scan_session_files_for_mocks(mock_clean_files, root=mock_clean_dir)
+    dt = time.time() - t0
+    passed = (mock_clean_res.total_findings == 0)
+    results.append(
+        TestResult(
+            category="Mock Detection",
+            fixture_name="02_clean_tests",
+            expectation="0 false positives on real, unmocked tests",
+            actual=f"Clean: 0 findings across {len(mock_clean_files)} files",
             passed=passed,
             duration_seconds=round(dt, 2),
         )

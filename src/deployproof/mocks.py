@@ -43,6 +43,7 @@ class MockDetector(ast.NodeVisitor):
         self.modified_lines = modified_lines
         self.findings: List[MockFinding] = []
         self._seen_lines_and_types: Set[Tuple[int, str]] = set()
+        self._decorator_call_nodes: Set[int] = set()
 
     def _add_finding(self, lineno: int, mock_type: str, description: str) -> None:
         if self.modified_lines is not None and lineno not in self.modified_lines:
@@ -105,6 +106,19 @@ class MockDetector(ast.NodeVisitor):
                     )
         self.generic_visit(node)
 
+    def _check_decorators(self, node: ast.AST) -> None:
+        decorators = getattr(node, "decorator_list", [])
+        for dec in decorators:
+            if isinstance(dec, ast.Call):
+                self._decorator_call_nodes.add(id(dec))
+            if self._is_patch_target_node(dec):
+                lineno = getattr(dec, "lineno", getattr(node, "lineno", 1))
+                self._add_finding(lineno, "patch_decorator", "@patch decorator")
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._check_decorators(node)
+        self.generic_visit(node)
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self._check_func(node)
         self.generic_visit(node)
@@ -126,11 +140,7 @@ class MockDetector(ast.NodeVisitor):
                         f"{arg.arg} fixture parameter in {getattr(node, 'name', 'function')}()",
                     )
 
-        decorators = getattr(node, "decorator_list", [])
-        for dec in decorators:
-            if self._is_patch_target_node(dec):
-                lineno = getattr(dec, "lineno", getattr(node, "lineno", 1))
-                self._add_finding(lineno, "patch_decorator", "@patch decorator")
+        self._check_decorators(node)
 
     def _is_patch_target_node(self, node: ast.AST) -> bool:
         if isinstance(node, ast.Call):
@@ -152,6 +162,11 @@ class MockDetector(ast.NodeVisitor):
         return False
 
     def visit_Call(self, node: ast.Call) -> None:
+        # If this call is an @patch decorator call, it is already recorded as patch_decorator
+        if id(node) in self._decorator_call_nodes:
+            self.generic_visit(node)
+            return
+
         if isinstance(node.func, ast.Attribute):
             if isinstance(node.func.value, ast.Name) and node.func.value.id == "monkeypatch":
                 self._add_finding(
