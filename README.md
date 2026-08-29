@@ -140,6 +140,8 @@ Pre-check clean: 100% of tested basic mutations caught.
 | `deployproof check --base <ref>` | Base git ref (branch/commit/tag) to diff against. |
 | `deployproof check --wsl` | Delegate mutation testing to `mutmut` inside WSL (Windows only). |
 
+> **Note:** `deployproof check --wsl` (Windows only) is newer and less battle-tested than the core checks — [file an issue](https://github.com/SVSPraveen/DeployProof/issues) if you hit something.
+
 ### Machine-Readable Output (`--json`)
 
 DeployProof provides a stable structured JSON schema for CI/CD pipelines, IDEs, and automation:
