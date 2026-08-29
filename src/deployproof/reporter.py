@@ -26,7 +26,7 @@ def format_json_report(
     strict_error_handling: bool = False,
     repo_root: Optional[Path] = None,
     threshold: float = 80.0,
-    version: str = "0.1.6",
+    version: str = "0.1.7",
 ) -> str:
     """Format all scan findings and mutation results as a structured JSON string."""
     root = (repo_root or Path.cwd()).resolve()
