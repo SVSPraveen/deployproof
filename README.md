@@ -2,8 +2,8 @@
 
 > Deterministic pre-push verification for AI-assisted codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense.
 
-[![PyPI version](https://img.shields.io/pypi/v/deployproof.svg?color=007ec6)](https://pypi.org/project/deployproof/)
-[![Python versions](https://img.shields.io/pypi/pyversions/deployproof.svg?color=3776ab)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.1.7-007ec6.svg)](https://pypi.org/project/deployproof/)
+[![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-79%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
 [![Stress Tests](https://img.shields.io/badge/stress%20tests-11%2F11%20passed-2ea44f.svg)](stress_fixtures/)
