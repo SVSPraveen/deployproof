@@ -10,7 +10,17 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    { name = "SVS Praveen" }
+    { name = "SVS Praveen", email = "svspraveens@gmail.com" }
+]
+keywords = [
+    "ai-code",
+    "mutation-testing",
+    "security-scanner",
+    "slopsquatting",
+    "ghostapproval",
+    "pre-push-verification",
+    "ast-analysis",
+    "dependency-security",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -34,10 +44,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/SVSPraveen/deployproof"
-Documentation = "https://github.com/SVSPraveen/deployproof#readme"
-Repository = "https://github.com/SVSPraveen/deployproof.git"
-"Bug Tracker" = "https://github.com/SVSPraveen/deployproof/issues"
+Homepage = "https://github.com/SVSPraveen/DeployProof"
+Documentation = "https://github.com/SVSPraveen/DeployProof#readme"
+Repository = "https://github.com/SVSPraveen/DeployProof.git"
+"Bug Tracker" = "https://github.com/SVSPraveen/DeployProof/issues"
 
 [project.scripts]
 deployproof = "deployproof.cli:main"
