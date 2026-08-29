@@ -151,6 +151,20 @@ def format_report(
                 src_str = f"{rel_src}:{finding.lineno}" if finding.lineno else str(rel_src)
                 lines.append(f"    * {finding.package_name} (Source: {src_str}) - {finding.details}")
 
+    # Unscanned dependency sources (seen, not checked)
+    if dependency_result and dependency_result.unscanned_count > 0:
+        lines.append(
+            f"\n  [!] {dependency_result.unscanned_count} unscanned dependency source{'s' if dependency_result.unscanned_count != 1 else ''} (seen, not checked):"
+        )
+        for finding in dependency_result.findings:
+            if finding.status == "UNSCANNED":
+                try:
+                    rel_src = finding.source_file.relative_to(root)
+                except ValueError:
+                    rel_src = finding.source_file
+                src_str = f"{rel_src}:{finding.lineno}" if finding.lineno else str(rel_src)
+                lines.append(f"    * {finding.import_name} (Source: {src_str}) - {finding.details}")
+
     # Score section
     lines.append("\nLocal Pre-Check Mutation Verification:")
     if result.total_mutants == 0:

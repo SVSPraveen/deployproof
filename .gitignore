@@ -27,6 +27,8 @@ venv/
 env/
 .env/
 .env*
+!stress_fixtures/**/.env*
+!tests/**/.env*
 ENV/
 env.bak/
 venv.bak/

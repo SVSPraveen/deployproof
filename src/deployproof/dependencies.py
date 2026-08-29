@@ -265,6 +265,7 @@ class ExtractedDependency:
     source_file: Path  # File where dependency was found
     lineno: Optional[int] = None  # Line number in file
     source_type: str = "import"  # "import" | "requirements.txt" | "pyproject.toml" | "setup.py"
+    unscanned_reason: Optional[str] = None  # Reason if source is seen but not checked against PyPI
 
 
 def get_local_module_names(root: Path) -> Set[str]:
@@ -524,8 +525,41 @@ def extract_new_manifest_dependencies(
         if is_requirements:
             if added_linenos is not None and idx not in added_linenos:
                 continue
-            if not raw_line or raw_line.startswith("#") or raw_line.startswith(("-r", "-e", "-f", "--", "-i")):
+            if not raw_line or raw_line.startswith("#"):
                 continue
+
+            # Handle -r / --requirement includes
+            if raw_line.startswith(("-r ", "--requirement ")):
+                extracted.append(
+                    ExtractedDependency(
+                        name=raw_line,
+                        import_name=raw_line,
+                        source_file=file_path,
+                        lineno=idx,
+                        source_type="requirements.txt",
+                        unscanned_reason="External requirements file include (-r) - seen, not checked",
+                    )
+                )
+                continue
+
+            # Handle VCS lines (git+, hg+, svn+, bzr+) and direct URLs
+            if any(raw_line.startswith(prefix) for prefix in ("git+", "hg+", "svn+", "bzr+", "-e git+", "-e hg+", "-e svn+", "-e bzr+", "http://", "https://", "-e http://", "-e https://")):
+                extracted.append(
+                    ExtractedDependency(
+                        name=raw_line,
+                        import_name=raw_line,
+                        source_file=file_path,
+                        lineno=idx,
+                        source_type="requirements.txt",
+                        unscanned_reason="VCS / direct URL dependency - seen, not checked",
+                    )
+                )
+                continue
+
+            # Other pip flags like -i, -f, --extra-index-url, --find-links
+            if raw_line.startswith(("-f ", "-i ", "--", "-e ")):
+                continue
+
             m = req_name_re.match(raw_line)
             if m:
                 pkg_name = m.group(1).strip()
@@ -665,6 +699,7 @@ class DependencyScanSummary:
     unknown_count: int
     findings: List[DependencyCheckResult]
     duration_seconds: float
+    unscanned_count: int = 0
 
 
 def query_pypi_registry(
@@ -779,8 +814,26 @@ def scan_dependencies(
     medium_risk = 0
     ok_count = 0
     unknown_count = 0
+    unscanned_count = 0
 
     for dep in extracted_deps:
+        if dep.unscanned_reason:
+            unscanned_count += 1
+            findings.append(
+                DependencyCheckResult(
+                    package_name=dep.name,
+                    import_name=dep.import_name,
+                    source_file=dep.source_file,
+                    lineno=dep.lineno,
+                    source_type=dep.source_type,
+                    status="UNSCANNED",
+                    age_days=None,
+                    first_release_date=None,
+                    details=dep.unscanned_reason,
+                )
+            )
+            continue
+
         status, age_days, first_date, details = query_pypi_registry(dep.name, cache=cache, timeout=timeout)
 
         if status == "HIGH_RISK":
@@ -816,5 +869,6 @@ def scan_dependencies(
         unknown_count=unknown_count,
         findings=findings,
         duration_seconds=duration,
+        unscanned_count=unscanned_count,
     )
 

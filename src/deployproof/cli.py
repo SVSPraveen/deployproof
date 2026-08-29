@@ -210,6 +210,52 @@ def handle_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_init(args: argparse.Namespace) -> int:
+    """Handle the 'init' subcommand to initialize configuration and git hooks."""
+    cwd = Path.cwd().resolve()
+    try:
+        repo_root = get_git_root(cwd)
+    except DiffScopeError:
+        repo_root = cwd
+
+    print(f"DeployProof: Initializing in {repo_root}...")
+
+    # 1. Create or verify configuration file (.deployproof.json)
+    config_path = repo_root / ".deployproof.json"
+    if not config_path.exists():
+        import json
+        default_config = {
+            "version": __version__,
+            "threshold": 80.0,
+            "timeout": 10.0,
+            "secrets_scanning": True,
+            "symlink_scanning": True,
+            "dependency_scanning": True,
+        }
+        config_path.write_text(json.dumps(default_config, indent=2) + "\n", encoding="utf-8")
+        print(f"  [+] Created configuration file: {config_path.name}")
+    else:
+        print(f"  [.] Configuration file already exists: {config_path.name}")
+
+    # 2. Install / verify git pre-push hook if inside git repo
+    hooks_dir = repo_root / ".git" / "hooks"
+    if hooks_dir.is_dir():
+        pre_push_hook = hooks_dir / "pre-push"
+        hook_script = "#!/usr/bin/env sh\n# DeployProof deterministic pre-push verification gate\ndeployproof check\n"
+        pre_push_hook.write_text(hook_script, encoding="utf-8")
+        try:
+            import stat
+            pre_push_hook.chmod(pre_push_hook.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        except Exception:
+            pass
+        print("  [+] Installed git pre-push hook: .git/hooks/pre-push")
+    else:
+        print("  [i] Note: .git/hooks directory not found. Initialize git to enable automatic pre-push gating.")
+
+    print("\nDeployProof initialization complete. Run 'deployproof check' to verify your session changes.")
+    return 0
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Entry point for the DeployProof CLI."""
     if hasattr(sys.stdout, "reconfigure"):
@@ -233,8 +279,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "check":
         return handle_check(args)
     elif args.command == "init":
-        print("DeployProof: Configuration initialized.")
-        return 0
+        return handle_init(args)
 
     return 0
 

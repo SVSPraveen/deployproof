@@ -41,12 +41,33 @@ def test_main_no_args(capsys):
     assert "deployproof" in captured.out
 
 
-def test_main_init(capsys):
-    """Verify main 'init' subcommand."""
+def test_main_init(tmp_path: Path, capsys, monkeypatch):
+    """Verify main 'init' subcommand creates config file and sets up git pre-push hook."""
+    monkeypatch.chdir(tmp_path)
+    import subprocess
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+
     exit_code = main(["init"])
     assert exit_code == 0
     captured = capsys.readouterr()
-    assert "initialized" in captured.out.lower()
+    assert "Initializing" in captured.out
+    assert "Created configuration file: .deployproof.json" in captured.out
+    assert "Installed git pre-push hook" in captured.out
+
+    # Check files exist on disk
+    config_file = tmp_path / ".deployproof.json"
+    assert config_file.exists()
+    assert '"threshold": 80.0' in config_file.read_text(encoding="utf-8")
+
+    hook_file = tmp_path / ".git" / "hooks" / "pre-push"
+    assert hook_file.exists()
+    assert "deployproof check" in hook_file.read_text(encoding="utf-8")
+
+    # Second run should be idempotent
+    exit_code2 = main(["init"])
+    assert exit_code2 == 0
+    captured2 = capsys.readouterr()
+    assert "Configuration file already exists" in captured2.out
 
 
 def test_main_check_explicit_files_passing(capsys):

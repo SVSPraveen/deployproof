@@ -32,7 +32,7 @@ KNOWN_PATTERNS: List[Tuple[str, Pattern[str], str]] = [
     ),
     (
         "AWS Secret Access Key",
-        re.compile(r"(?i)\b(?:aws_secret_access_key|aws_secret_key)\s*[:=]\s*[\"']([A-Za-z0-9/+=]{40})[\"']"),
+        re.compile(r"(?i)\b(?:aws_secret_access_key|aws_secret_key)\s*[:=]\s*[\"']?([A-Za-z0-9/+=]{40})[\"']?"),
         "Likely hardcoded AWS Secret Access Key",
     ),
     (
@@ -68,7 +68,7 @@ KNOWN_PATTERNS: List[Tuple[str, Pattern[str], str]] = [
 ]
 
 GENERIC_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)\b([a-z0-9_]*(?:api_?key|secret|token|password|passwd|auth_?token|access_?token|private_?key|client_?secret)[a-z0-9_]*)\s*[:=]\s*[\"']([^\"'\s]{16,})[\"']"
+    r"(?i)\b([a-z0-9_]*(?:api_?key|secret|token|pass(?:word|wd)?|auth_?token|access_?token|private_?key|client_?secret)[a-z0-9_]*)\s*[:=]\s*(?:[\"']([^\"'\r\n]{16,})[\"']|([^\s\"'#]{16,}))"
 )
 
 PLACEHOLDER_EXACT_OR_PREFIX = {
@@ -162,6 +162,7 @@ def scan_file_for_secrets(file_path: Path) -> List[SecretFinding]:
             continue
 
         # Check known regex patterns
+        matched_known = False
         for rule_name, pattern, desc in KNOWN_PATTERNS:
             match = pattern.search(line)
             if match:
@@ -177,25 +178,28 @@ def scan_file_for_secrets(file_path: Path) -> List[SecretFinding]:
                             snippet=stripped,
                         )
                     )
+                    matched_known = True
 
         # Check generic high-entropy secret assignments
-        assignment_match = GENERIC_ASSIGNMENT_PATTERN.search(line)
-        if assignment_match:
-            var_name, secret_val = assignment_match.group(1), assignment_match.group(2)
-            if not is_placeholder(secret_val):
-                entropy = calculate_shannon_entropy(secret_val)
-                # Strings with length >= 16 and entropy >= 3.8 indicate high-entropy random credentials
-                if entropy >= 3.8:
-                    findings.append(
-                        SecretFinding(
-                            file_path=file_path,
-                            line_number=line_idx,
-                            rule_name="High-Entropy Credential Assignment",
-                            description=f"High-entropy credential assigned to '{var_name}' (entropy: {entropy:.2f})",
-                            redacted_value=redact_secret(secret_val),
-                            snippet=stripped,
+        if not matched_known:
+            assignment_match = GENERIC_ASSIGNMENT_PATTERN.search(line)
+            if assignment_match:
+                var_name = assignment_match.group(1)
+                secret_val = assignment_match.group(2) or assignment_match.group(3)
+                if secret_val and not is_placeholder(secret_val):
+                    entropy = calculate_shannon_entropy(secret_val)
+                    # Strings with length >= 16 and entropy >= 3.8 indicate high-entropy random credentials
+                    if entropy >= 3.8:
+                        findings.append(
+                            SecretFinding(
+                                file_path=file_path,
+                                line_number=line_idx,
+                                rule_name="High-Entropy Credential Assignment",
+                                description=f"High-entropy credential assigned to '{var_name}' (entropy: {entropy:.2f})",
+                                redacted_value=redact_secret(secret_val),
+                                snippet=stripped,
+                            )
                         )
-                    )
 
     return findings
 

@@ -144,3 +144,63 @@ def test_cli_blocks_on_high_risk_dependency(tmp_path: Path, monkeypatch):
         )
         exit_code = main(["check", "--files", str(app_py)])
         assert exit_code == 1
+
+
+def test_format_report_with_unscanned_dependency_source(tmp_path: Path):
+    req_file = tmp_path / "requirements.txt"
+    dep_summary = DependencyScanSummary(
+        total_scanned=2,
+        high_risk_count=0,
+        medium_risk_count=0,
+        ok_count=1,
+        unknown_count=0,
+        findings=[
+            DependencyCheckResult(
+                package_name="requests",
+                import_name="requests",
+                source_file=req_file,
+                lineno=1,
+                source_type="requirements.txt",
+                status="OK",
+                age_days=5000,
+                first_release_date="2011-02-14",
+                details="Established package",
+            ),
+            DependencyCheckResult(
+                package_name="-r base.txt",
+                import_name="-r base.txt",
+                source_file=req_file,
+                lineno=2,
+                source_type="requirements.txt",
+                status="UNSCANNED",
+                age_days=None,
+                first_release_date=None,
+                details="External requirements file include (-r) - seen, not checked",
+            ),
+        ],
+        duration_seconds=0.1,
+        unscanned_count=1,
+    )
+
+    mut_res = MutationResult(
+        total_mutants=0,
+        killed_mutants=0,
+        survived_mutants=[],
+        untested_files=[],
+        runner_errors=[],
+        skipped_constructs=[],
+        mutation_score=100.0,
+        duration_seconds=0.1,
+        files_tested=[],
+    )
+
+    report = format_report(
+        result=mut_res,
+        target_files=[],
+        dependency_result=dep_summary,
+        repo_root=tmp_path,
+    )
+
+    assert "1 unscanned dependency source (seen, not checked):" in report
+    assert "* -r base.txt (Source: requirements.txt:2) - External requirements file include (-r) - seen, not checked" in report
+

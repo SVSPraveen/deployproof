@@ -104,3 +104,40 @@ def test_scan_json_and_yaml_files():
         rules = [f.rule_name for f in res.findings]
         assert "GitHub Token" in rules
         assert "Slack Token" in rules
+
+
+def test_scan_unquoted_env_secrets():
+    """Verify scanner catches individual unquoted secrets inside .env files beyond the tracked file warning."""
+    env_content = '''# Sample production environment variables
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+DB_PASSWORD=v3ry_s3cr3t_p@ssw0rd_1234567890
+STRIPE_SECRET_KEY=sk_live_51AbCdEfGhIjKlMnOpQrStUvWxYz1234567890
+SAFE_SETTING=production
+'''
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env_file = Path(tmpdir) / ".env.production"
+        env_file.write_text(env_content, encoding="utf-8")
+
+        findings = scan_file_for_secrets(env_file)
+        # Expected: 1 tracked env file finding + 3 secret value findings = 4 total
+        assert len(findings) == 4
+
+        rules = {f.rule_name: f for f in findings}
+        assert "Tracked Environment File" in rules
+        assert "AWS Secret Access Key" in rules
+        assert "High-Entropy Credential Assignment" in rules
+        assert "Stripe Secret Key" in rules
+
+        # Verify line numbers and secret contents
+        aws_finding = rules["AWS Secret Access Key"]
+        assert aws_finding.line_number == 2
+        assert aws_finding.redacted_value.startswith("wJ") and aws_finding.redacted_value.endswith("EY")
+
+        pwd_finding = rules["High-Entropy Credential Assignment"]
+        assert pwd_finding.line_number == 3
+        assert pwd_finding.redacted_value.startswith("v3") and pwd_finding.redacted_value.endswith("90")
+
+        stripe_finding = rules["Stripe Secret Key"]
+        assert stripe_finding.line_number == 4
+        assert stripe_finding.redacted_value.startswith("sk") and stripe_finding.redacted_value.endswith("90")
+

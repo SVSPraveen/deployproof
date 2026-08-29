@@ -101,6 +101,7 @@ requests>=2.31.0
 pytest==8.0.0
 scikit-learn~=1.4.0
 -r other-requirements.txt
+git+https://github.com/psf/requests.git@main#egg=requests
 # comment line
 hallucinated-tool-xyz
 """,
@@ -115,7 +116,13 @@ hallucinated-tool-xyz
     assert "pytest" in extracted_names
     assert "scikit-learn" in extracted_names
     assert "hallucinated-tool-xyz" in extracted_names
-    assert "-r" not in extracted_names
+    assert "-r other-requirements.txt" in extracted_names
+    assert "git+https://github.com/psf/requests.git@main#egg=requests" in extracted_names
+
+    unscanned = [d for d in extracted if d.unscanned_reason]
+    assert len(unscanned) == 2
+    assert any("-r" in d.unscanned_reason for d in unscanned)
+    assert any("VCS" in d.unscanned_reason for d in unscanned)
 
 
 def test_extract_manifest_pyproject_toml(tmp_path: Path):
