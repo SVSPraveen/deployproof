@@ -1,6 +1,6 @@
 # DeployProof
 
-> A pre-push verification tool for AI-assisted codebases: mutation testing, credential scanning, sandbox-escape detection, and dependency hallucination checks.
+> Deterministic pre-push verification for AI-assisted codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense.
 
 [![PyPI version](https://img.shields.io/pypi/v/deployproof.svg?color=blue)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/pypi/pyversions/deployproof.svg?color=blue)](https://pypi.org/project/deployproof/)
@@ -11,7 +11,7 @@
 
 ## Why This Exists
 
-AI-assisted development introduces failure modes that standard tools miss: test suites with high line coverage but near-zero mutation scores, hardcoded credentials generated in passing, symlinks that deceive approval prompts into escaping the repository sandbox, and package names hallucinated by LLMs that don't exist on PyPI. DeployProof catches these at the pre-push stage, before they reach CI or production.
+AI-assisted development introduces subtle failure modes that standard linters and coverage tools miss: test suites with high line coverage but near-zero mutation scores, hardcoded credentials generated in passing, symlinks that deceive approval prompts into escaping the repository sandbox, silently swallowed exceptions, and package names hallucinated by LLMs that don't exist on PyPI. DeployProof catches these at the pre-push stage, before they reach CI or production.
 
 ## Install
 
@@ -29,13 +29,26 @@ Initialize in your repository:
 deployproof init
 ```
 
-Run all verification checks against changes in the current session:
+Run all verification checks against changes in the current session (git diff):
 
 ```bash
 deployproof check
 ```
 
-Output includes a section for each check — symlink scan, secrets scan, dependency scan, mock detection, control flow analysis, and mutation score — with a pass/fail line at the bottom. Exit code is non-zero on any finding that should block a push. Supports `--json` for machine-readable output and `--strict-mocks` / `--strict-error-handling` to turn informational checks into hard verification gates.
+Output includes a section for each check — symlink scan, secrets scan, dependency scan, mock detection, control flow analysis, and mutation score — with a pass/fail line at the bottom. Exit code is non-zero on any finding that should block a push.
+
+### CLI Options & Flags
+
+| Flag | Description |
+|---|---|
+| `deployproof check` | Run all 6 pre-push verification checks (informational warnings for mocks and error handling). |
+| `deployproof check --json` | Output structured, machine-readable JSON for CI/CD pipelines, IDEs, and automation. |
+| `deployproof check --strict-mocks` | Fail the gate (exit code 1) if new `unittest.mock`, `mocker`, or `monkeypatch` usage is introduced. |
+| `deployproof check --strict-error-handling` | Fail the gate (exit code 1) if bare excepts, swallowed exceptions, or dead code are detected. |
+| `deployproof check --files <paths...>` | Explicitly evaluate specific files (bypasses git diff). |
+| `deployproof check --threshold <float>` | Minimum mutation score percentage required to pass (default: `80.0`). |
+| `deployproof check --base <ref>` | Base git ref (branch/commit/tag) to diff against. |
+| `deployproof check --wsl` | Delegate mutation testing to `mutmut` inside WSL (Windows only). |
 
 ### Machine-Readable Output (`--json`)
 
