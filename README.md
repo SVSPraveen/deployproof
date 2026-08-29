@@ -62,7 +62,7 @@ deployproof check --json
 
 ```json
 {
-  "version": "0.1.5",
+  "version": "0.1.6",
   "status": "passed",
   "summary": {
     "target_files_count": 1,
@@ -161,7 +161,7 @@ Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS cr
 
 ## Status & Roadmap
 
-- **Current (v0.1.5):** Diff-scoped AST mutation testing, secrets scanner (including unquoted .env values), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with recursive `-r` requirements scanning and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
+- **Current (v0.1.6):** Diff-scoped AST mutation testing, secrets scanner (including unquoted .env values), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with recursive `-r` requirements scanning and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
 - **Next:** Multi-language mutation support and expanded ecosystem rule packs.
 
 ## Contributing
