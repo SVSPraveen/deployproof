@@ -2,10 +2,10 @@
 
 > Deterministic pre-push verification for AI-assisted codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v0.1.8-007ec6.svg)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.2.0-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-88%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
+[![Tests](https://img.shields.io/badge/tests-93%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
 [![Stress Tests](https://img.shields.io/badge/stress%20tests-11%2F11%20passed-2ea44f.svg)](stress_fixtures/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -159,7 +159,7 @@ deployproof check --json
 
 ```json
 {
-  "version": "0.1.8",
+  "version": "0.2.0",
   "status": "passed",
   "summary": {
     "target_files_count": 1,
@@ -232,7 +232,7 @@ deployproof check --json
 
 ## What It Checks
 
-- **Mutation Score** — Mutates AST operators (`>=`, `==`, `and`, `or`, `*`, numeric constants, comparisons) in modified files and runs your test suite against each mutant. Reports surviving mutants and a percentage score. Does not use line coverage.
+- **Mutation Score** — Mutates AST operators (`>=`, `==`, `and`, `or`, `*`, numeric constants, comparisons) in modified files and runs your test suite against each mutant. Reports surviving mutants and a percentage score. Does not use line coverage. Features atomic file restoration protected by `SIGINT`/`SIGTERM`/`SIGBREAK` signal handlers to ensure interrupted runs never leave mutated code on disk.
 - **Secrets and Credentials** — Scans modified files for hardcoded API keys (OpenAI, Anthropic, AWS, GitHub, Stripe, private keys) and tracked `.env` files using pattern matching and entropy analysis.
 - **Symlink and Sandbox Escape** — Resolves symbolic links and flags any whose target escapes the repository root (CWE-61 / CWE-451). Catches the class of path-traversal trick used in the GhostApproval disclosure (Wiz Research, July 2026).
 - **Dependency and Slopsquatting** — For each new import, dynamic import (`importlib.import_module`, `__import__`), or manifest entry (including recursive `-r` includes) introduced in the diff, queries the PyPI JSON API and checks registration age. Packages that don't exist (HTTP 404) are flagged HIGH RISK; packages registered within the last 30 days are flagged MEDIUM RISK.
@@ -258,7 +258,7 @@ Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS cr
 
 ## Status & Roadmap
 
-- **Current (v0.1.8):** Diff-scoped AST mutation testing (with recursive `test/`/`tests/` discovery and precise column-offset snippet reconstruction), baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner (including unquoted .env values and prefix validation), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks` and deduplicated decorator detection), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, 88 unit tests, machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
+- **Current (v0.2.0):** Diff-scoped AST mutation testing (with recursive `test/`/`tests/` discovery, AST column-offset snippet reconstruction, and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner (including unquoted .env values and prefix validation), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, 93 unit tests, machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
 - **Next:** Multi-language mutation support and expanded ecosystem rule packs.
 
 ## Contributing

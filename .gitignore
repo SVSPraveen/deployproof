@@ -35,6 +35,7 @@ venv.bak/
 scratch_venv/
 .scratch_venv/
 scratch_repos/
+scratch/
 
 # Testing and coverage
 .pytest_cache/

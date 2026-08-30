@@ -1,11 +1,14 @@
 """Symlink and sandbox-escape scanner for DeployProof (CWE-61 + CWE-451)."""
 
+import logging
 import os
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,8 +52,14 @@ def get_git_symlink_paths(repo_root: Path) -> Set[Path]:
                     if len(parts) >= 4:
                         rel_path = parts[3]
                         symlinks.add((repo_root / rel_path).resolve())
-    except Exception:
-        pass
+        else:
+            logger.debug("git ls-files -s returned non-zero exit code %s for %s", res.returncode, repo_root)
+    except (subprocess.SubprocessError, OSError) as e:
+        logger.debug("Failed to query git symlinks for %s: %s", repo_root, e)
+        return set()
+    except Exception as e:
+        logger.warning("Unexpected error querying git symlinks for %s: %s", repo_root, e)
+        return set()
     return symlinks
 
 
@@ -65,7 +74,11 @@ def is_symlink_path(file_path: Path, git_symlinks: Optional[Set[Path]] = None) -
         try:
             raw_target = os.readlink(file_path)
             return True, str(raw_target)
-        except Exception:
+        except OSError as e:
+            logger.debug("Failed to read native symlink '%s': %s", file_path, e)
+            return True, ""
+        except Exception as e:
+            logger.warning("Unexpected error reading native symlink '%s': %s", file_path, e)
             return True, ""
 
     # 2. Git-tracked mode 120000 check (for Windows environments where git checkouts store pointer text)
@@ -75,8 +88,12 @@ def is_symlink_path(file_path: Path, git_symlinks: Optional[Set[Path]] = None) -
             # If the file is small and contains a relative or absolute path pointer
             if content and "\n" not in content and len(content) < 1024:
                 return True, content
-        except Exception:
-            pass
+        except OSError as e:
+            logger.debug("Failed to read git symlink pointer file '%s': %s", file_path, e)
+            return False, ""
+        except Exception as e:
+            logger.warning("Unexpected error reading git symlink pointer file '%s': %s", file_path, e)
+            return False, ""
 
     return False, ""
 

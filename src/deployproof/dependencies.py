@@ -983,7 +983,7 @@ def query_pypi_registry(
     url = f"https://pypi.org/pypi/{canonical_pkg}/json"
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "DeployProof/0.1.8 (https://github.com/SVSPraveen/DeployProof)"},
+        headers={"User-Agent": "DeployProof/0.2.0 (https://github.com/SVSPraveen/DeployProof)"},
     )
 
     try:
@@ -993,6 +993,7 @@ def query_pypi_registry(
                 data = json.loads(raw_bytes.decode("utf-8"))
                 releases = data.get("releases", {})
                 timestamps: List[datetime.datetime] = []
+                parse_error: Optional[str] = None
 
                 for ver, files in releases.items():
                     for f in files:
@@ -1001,10 +1002,14 @@ def query_pypi_registry(
                             try:
                                 dt = datetime.datetime.fromisoformat(t_str.replace("Z", "+00:00"))
                                 timestamps.append(dt)
-                            except Exception:
-                                pass
+                            except (ValueError, TypeError) as e:
+                                parse_error = f"Failed to parse release timestamp '{t_str}': {e}"
+                            except Exception as e:
+                                parse_error = f"Unexpected error parsing release timestamp '{t_str}': {e}"
 
-                if not timestamps:
+                if parse_error and not timestamps:
+                    result = ("UNKNOWN", None, None, f"PyPI release date parse error for package '{canonical_pkg}': {parse_error}")
+                elif not timestamps:
                     if canonical_pkg.lower() in KNOWN_NAMESPACE_ROOTS or norm_name.lower() in KNOWN_NAMESPACE_ROOTS:
                         result = ("OK", None, None, f"Namespace package umbrella root ('{canonical_pkg}') - subpackages published separately on PyPI")
                     else:

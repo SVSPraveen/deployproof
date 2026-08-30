@@ -1,7 +1,7 @@
 # DeployProof Architectural Decisions (DECISIONS.md)
 
-*Document updated: August 28, 2026*  
-*Scope: V1 Diff-Scoping Strategy, Two-Tier Mutation Architecture & Edge-Case Validation*
+*Document updated: August 30, 2026*  
+*Scope: V1 Diff-Scoping Strategy, Two-Tier Mutation Architecture, Production Hardening & v0.2.0 Safety Guarantees*
 
 ---
 
@@ -131,10 +131,11 @@ Testing DeployProof against diverse, large-scale production codebases revealed 5
   - Keyword argument names: `pass_arg`, `pass_script_info`, `pass_original` (in `click`, `flask`).
   - Schema/documentation field declarations: `password = fields.Str(...)` (in `marshmallow`).
   - Context tokens: `self.token = _CURRENT_CONTEXT.set(...)` (in `httpx`).
-- **Architectural Decision**: Replaced identifier substring matching with value-based AST assignment analysis:
-  - Requires string literal values meeting high Shannon entropy thresholds (entropy >= 3.5).
+- **Architectural Decision**: Replaced broad identifier substring matching with multi-stage validation:
+  - Targeted credential-variable regex pattern boundaries (`CREDENTIAL_VAR_RE`) to avoid matching non-credential identifiers like `pass_arg`.
+  - Mandatory quoted-string literal validation in code files (`is_non_secret_code_or_schema`), immediately filtering out unquoted code expressions (such as schema definitions like `fields.Str(...)` or context tokens like `_CURRENT_CONTEXT.set(...)`).
+  - Shannon entropy threshold scoring (`entropy >= 3.8`) on candidate string literal values to separate random keys from regular text.
   - Explicit pattern matching for recognized credential formats (OpenAI `sk-`, Anthropic `sk-ant-`, AWS `AKIA`, GitHub `ghp_`, Stripe `sk_live_`, RSA/SSH private keys).
-  - Identifier names containing "password" or "secret" must be assigned non-trivial string literals, not schema objects or parameter definitions.
 
 ### 3. Manifest Filtering & Import-to-Distribution Mapping (`dependencies.py`)
 - **Observed Defect**:
@@ -155,4 +156,13 @@ Testing DeployProof against diverse, large-scale production codebases revealed 5
   - Omitted the mutation score entirely (`score = None`) in text and JSON outputs.
   - Output explicit diagnostic guidance: `"Could not run test suite — tests failed to execute before any mutation testing began"` with the underlying exception details.
   - Assigned distinct **exit code `2`** to environment/runner errors, allowing CI/CD pipelines to differentiate environment blockers from verification gate failures (exit code `1`) and clean passing runs (exit code `0`).
+
+### 6. Signal-Safe Disk Restoration & Atomic Cleanup (`mutator.py`)
+- **Observed Defect**: While standard `try ... finally` blocks guarantee file restoration during normal Python exception handling and `KeyboardInterrupt`, hard process terminations (e.g. `SIGINT` from Ctrl+C during long-running tests, `SIGTERM` from process supervisors, or `SIGBREAK` in Windows consoles) could bypass the Python unwind stack and leave mutated source files on disk.
+- **Architectural Decision**:
+  - Maintained global state tracking the currently mutated file path and original unmutated content (`_CURRENT_MUTATED_FILE`, `_CURRENT_ORIGINAL_CONTENT`).
+  - Registered dedicated OS signal handlers for `SIGINT`, `SIGTERM`, and `SIGBREAK` (available on Windows where Ctrl+Break generates `SIGBREAK` rather than `SIGINT`).
+  - Registered an `atexit` fallback hook as defense-in-depth against sudden process termination.
+  - Ensured any restoration failure during signal handling prints an immediate, visible warning to `sys.stderr` rather than failing silently.
+
 

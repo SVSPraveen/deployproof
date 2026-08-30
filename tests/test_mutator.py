@@ -1,6 +1,7 @@
 """Tests for AST mutant generation and transformer logic."""
 
 import ast
+import subprocess
 import tempfile
 from pathlib import Path
 from deployproof.mutator import (
@@ -150,5 +151,225 @@ def test_mutant_snippet_display_preserves_variable_names():
         assert m.original_line == "is_py3 = _ver[0] == 3"
         assert m.mutated_line == "is_py3 = _ver[0] == 4"
         assert "is_py4" not in m.mutated_line
+
+
+def test_file_restoration_guarantee_on_interrupt():
+    """Verify that original file contents are guaranteed to be restored even if an exception occurs."""
+    from deployproof.mutator import run_mutation_tests
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir).resolve()
+        src = root / "service.py"
+        orig_text = "def check(x: int) -> bool:\n    return x > 0\n"
+        src.write_text(orig_text, encoding="utf-8")
+
+        test = root / "test_service.py"
+        test.write_text("from service import check\ndef test_ok():\n    assert check(1) is True\n", encoding="utf-8")
+
+        # Simulate a KeyboardInterrupt mid-mutation execution
+        call_count = 0
+        real_run = subprocess.run
+        def mock_subprocess_run(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:  # After baseline, interrupt during mutant run
+                raise KeyboardInterrupt("Simulated Ctrl+C")
+            return real_run(*args, **kwargs)
+
+        with patch("subprocess.run", side_effect=mock_subprocess_run):
+            try:
+                run_mutation_tests(
+                    target_files=[src],
+                    repo_root=root,
+                    extra_pytest_args=[str(test)],
+                )
+            except KeyboardInterrupt:
+                pass
+
+        # File MUST be restored to original contents
+        assert src.read_text(encoding="utf-8") == orig_text
+
+
+def test_timeout_mutant_treated_as_killed():
+    """Verify that a mutant test run that times out is treated as KILLED and restores the file."""
+    from deployproof.mutator import run_mutation_tests
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir).resolve()
+        src = root / "service.py"
+        orig_text = "def check(x: int) -> bool:\n    return x > 0\n"
+        src.write_text(orig_text, encoding="utf-8")
+
+        test = root / "test_service.py"
+        test.write_text("from service import check\ndef test_ok():\n    assert check(1) is True\n", encoding="utf-8")
+
+        call_count = 0
+        real_run = subprocess.run
+        def mock_subprocess_run(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:  # Baseline succeeds, mutant times out
+                raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout", 10.0))
+            return real_run(*args, **kwargs)
+
+        with patch("subprocess.run", side_effect=mock_subprocess_run):
+            res = run_mutation_tests(
+                target_files=[src],
+                repo_root=root,
+                extra_pytest_args=[str(test)],
+            )
+
+        assert res.killed_mutants == res.total_mutants
+        assert res.mutation_score == 100.0
+        assert src.read_text(encoding="utf-8") == orig_text
+
+
+def test_signal_handler_restores_mutated_file_on_sigint():
+    """Verify that _mutation_signal_handler restores on-disk source on SIGINT before raising KeyboardInterrupt."""
+    import signal
+    from deployproof import mutator
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src = Path(tmpdir) / "app.py"
+        orig_code = "def add(a, b):\n    return a + b\n"
+        mutated_code = "def add(a, b):\n    return a - b\n"
+        src.write_text(mutated_code, encoding="utf-8")
+
+        # Simulate active mutant tracking
+        mutator._CURRENT_MUTATED_FILE = src
+        mutator._CURRENT_ORIGINAL_CONTENT = orig_code
+
+        try:
+            mutator._mutation_signal_handler(signal.SIGINT, None)
+        except KeyboardInterrupt:
+            pass
+
+        # The file on disk must be restored to orig_code
+        assert src.read_text(encoding="utf-8") == orig_code
+        assert mutator._CURRENT_MUTATED_FILE is None
+        assert mutator._CURRENT_ORIGINAL_CONTENT is None
+
+
+def test_signal_handler_restores_mutated_file_on_sigterm():
+    """Verify that _mutation_signal_handler restores on-disk source on SIGTERM before process exit."""
+    import signal
+    from unittest.mock import patch
+    from deployproof import mutator
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src = Path(tmpdir) / "app.py"
+        orig_code = "def multiply(a, b):\n    return a * b\n"
+        mutated_code = "def multiply(a, b):\n    return a / b\n"
+        src.write_text(mutated_code, encoding="utf-8")
+
+        # Simulate active mutant tracking
+        mutator._CURRENT_MUTATED_FILE = src
+        mutator._CURRENT_ORIGINAL_CONTENT = orig_code
+
+        with patch("sys.exit") as mock_exit:
+            sig = getattr(signal, "SIGTERM", 15)
+            mutator._mutation_signal_handler(sig, None)
+            mock_exit.assert_called_once_with(128 + sig)
+
+        # The file on disk must be restored to orig_code
+        assert src.read_text(encoding="utf-8") == orig_code
+        assert mutator._CURRENT_MUTATED_FILE is None
+        assert mutator._CURRENT_ORIGINAL_CONTENT is None
+
+
+def test_real_subprocess_os_signal_interrupt_restoration():
+    """Verify that sending a real OS signal to a running deployproof process restores mutant files."""
+    import os
+    import signal
+    import subprocess
+    import sys
+    import time
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir).resolve()
+        src_file = tmp_path / "calc.py"
+        orig_code = (
+            "def calculate(a: int, b: int, c: int) -> int:\n"
+            "    res = 0\n"
+            "    if a > 0 and b > 0:\n"
+            "        res = a * b + 10\n"
+            "    elif a <= 0 or b < 0:\n"
+            "        res = a - b - 5\n"
+            "    if c >= 100:\n"
+            "        res = res * 2 + 50\n"
+            "    else:\n"
+            "        res = res // 2 - 1\n"
+            "    return res + 1\n"
+        )
+        src_file.write_text(orig_code, encoding="utf-8")
+
+        test_file = tmp_path / "test_calc.py"
+        test_code = (
+            "import time\n"
+            "from calc import calculate\n\n"
+            "def test_calculate():\n"
+            "    time.sleep(0.4)\n"
+            "    assert calculate(2, 3, 50) == 8\n"
+        )
+        test_file.write_text(test_code, encoding="utf-8")
+
+        # Initialize temporary git repo
+        subprocess.run(["git", "init"], cwd=str(tmp_path), capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=str(tmp_path), capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=str(tmp_path), capture_output=True, check=True)
+        subprocess.run(["git", "add", "."], cwd=str(tmp_path), capture_output=True, check=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmp_path), capture_output=True, check=True)
+
+        # Modify calc.py to be in diff
+        mod_code = orig_code + "\n# touch\n"
+        src_file.write_text(mod_code, encoding="utf-8")
+
+        repo_root = Path(__file__).resolve().parent.parent
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(repo_root / "src")
+
+        cmd = [sys.executable, "-m", "deployproof.cli", "check", "--files", "calc.py"]
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(tmp_path),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            creationflags=creationflags,
+        )
+
+        start_wait = time.time()
+        mutant_detected = False
+        while time.time() - start_wait < 15.0:
+            if src_file.read_text(encoding="utf-8") != mod_code:
+                mutant_detected = True
+                break
+            if proc.poll() is not None:
+                break
+            time.sleep(0.02)
+
+        assert mutant_detected is True, "Mutant was not written to disk during the test window."
+
+        if sys.platform == "win32":
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            proc.send_signal(signal.SIGINT)
+
+        try:
+            proc.communicate(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+
+        # Target source file MUST be restored to original content immediately
+        assert src_file.read_text(encoding="utf-8") == mod_code
+
+
+
 
 
