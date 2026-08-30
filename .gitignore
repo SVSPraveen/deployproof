@@ -59,3 +59,7 @@ symbolindex.json
 
 # Local manual test folders
 Test purpose/
+deployproof-demo.*
+demo.*
+*.cast
+*.gif
