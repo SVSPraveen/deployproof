@@ -2,6 +2,7 @@
 import ast
 import atexit
 import copy
+import importlib.util
 import os
 import re
 import shutil
@@ -57,7 +58,7 @@ _PREV_SIGTERM: Any = None
 _PREV_SIGBREAK: Any = None
 
 def _restore_current_mutant_file() -> None:
-    """Immediately restore the currently mutated file on disk if one is active."""
+    """Immediately restore the currently mutated file on disk if one is active and clear its specific bytecode cache."""
     global _CURRENT_MUTATED_FILE, _CURRENT_ORIGINAL_CONTENT
     if _CURRENT_MUTATED_FILE is not None and _CURRENT_ORIGINAL_CONTENT is not None:
         target_path = _CURRENT_MUTATED_FILE
@@ -70,6 +71,17 @@ def _restore_current_mutant_file() -> None:
                 f"Please verify this file's contents before committing or running tests.\n"
             )
             sys.stderr.flush()
+
+        # Remove specific __pycache__ .pyc entry for target_path if it exists
+        try:
+            pyc_path_str = importlib.util.cache_from_source(str(target_path))
+            if pyc_path_str:
+                pyc_file = Path(pyc_path_str)
+                if pyc_file.is_file():
+                    pyc_file.unlink(missing_ok=True)
+        except (OSError, ValueError):
+            pass
+
         _CURRENT_MUTATED_FILE = None
         _CURRENT_ORIGINAL_CONTENT = None
 atexit.register(_restore_current_mutant_file)

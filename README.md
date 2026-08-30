@@ -5,7 +5,7 @@
 [![PyPI version](https://img.shields.io/badge/pypi-v0.2.0-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-93%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
+[![Tests](https://img.shields.io/badge/tests-94%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
 [![Stress Tests](https://img.shields.io/badge/stress%20tests-11%2F11%20passed-2ea44f.svg)](stress_fixtures/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -241,6 +241,7 @@ deployproof check --json
 
 ## What This Doesn't Do
 
+- **Test-only diffs are not yet caught.** If a diff modifies or weakens assertions in a test file without changing the corresponding source file, DeployProof currently sees zero modified source lines and passes with 0 mutants evaluated. This is a known gap — see [INVESTIGATION_blastradius.md](INVESTIGATION_blastradius.md) for the reverse-mapping approach being evaluated to close it. Until this lands, DeployProof does not protect against test suites being weakened directly.
 - **Not a full-repo audit.** Checks are scoped to files changed in the current session (git diff). Files you haven't touched are not re-evaluated.
 - **Python only.** Mutation testing and import extraction currently support Python files only. Other languages are not scanned.
 - **No auto-fix.** DeployProof reports findings; it does not modify your code, rewrite imports, or suggest patches.
@@ -258,7 +259,7 @@ Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS cr
 
 ## Status & Roadmap
 
-- **Current (v0.2.0):** Diff-scoped AST mutation testing (with recursive `test/`/`tests/` discovery, AST column-offset snippet reconstruction, and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner (including unquoted .env values and prefix validation), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, 93 unit tests, machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
+- **Current (v0.2.0):** Diff-scoped AST mutation testing (with recursive `test/`/`tests/` discovery, AST column-offset snippet reconstruction, and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner (including unquoted .env values and prefix validation), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, 94 unit tests, machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
 - **Next:** Multi-language mutation support and expanded ecosystem rule packs.
 
 ## Contributing

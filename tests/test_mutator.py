@@ -370,6 +370,43 @@ def test_real_subprocess_os_signal_interrupt_restoration():
         assert src_file.read_text(encoding="utf-8") == mod_code
 
 
+def test_restore_removes_pyc_cache_file():
+    """Verify that _restore_current_mutant_file unlinks the exact .pyc cache file without removing other cache files."""
+    import importlib.util
+    import py_compile
+    from deployproof import mutator
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_path = Path(tmpdir).resolve()
+        src1 = tmp_path / "module1.py"
+        src1.write_text("def func1(): return 1\n", encoding="utf-8")
+        src2 = tmp_path / "module2.py"
+        src2.write_text("def func2(): return 2\n", encoding="utf-8")
+
+        # Compile both to generate .pyc files in __pycache__
+        py_compile.compile(str(src1), doraise=True)
+        py_compile.compile(str(src2), doraise=True)
+
+        pyc1_path = Path(importlib.util.cache_from_source(str(src1)))
+        pyc2_path = Path(importlib.util.cache_from_source(str(src2)))
+
+        assert pyc1_path.is_file(), "pyc1 should exist before restoration"
+        assert pyc2_path.is_file(), "pyc2 should exist before restoration"
+
+        # Simulate active mutant tracking on src1
+        mutator._CURRENT_MUTATED_FILE = src1
+        mutator._CURRENT_ORIGINAL_CONTENT = "def func1(): return 100\n"
+
+        # Trigger restoration (as happens on interrupt / atexit)
+        mutator._restore_current_mutant_file()
+
+        # src1 should be restored and its specific .pyc removed
+        assert src1.read_text(encoding="utf-8") == "def func1(): return 100\n"
+        assert not pyc1_path.exists(), "src1's specific .pyc must be deleted"
+        assert pyc2_path.is_file(), "unrelated src2's .pyc must remain intact"
+
+
+
 
 
 

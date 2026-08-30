@@ -20,4 +20,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Baseline Collection Failure Isolation**: Distinctly detects when a test suite fails before mutation testing begins (pytest exit codes 2/3/4, `ModuleNotFoundError`, `ImportError`, conftest crashes). Returns exit code `2` with actionable diagnostic error output instead of a misleading `0.0%` mutation score.
 - **Signal-Safe Disk Restoration**: Installed signal handlers for `SIGINT`, `SIGTERM`, and `SIGBREAK` (Windows console break), backed by `atexit`, guaranteeing that mutated source files are restored to their original unmutated contents even if the process is interrupted mid-run.
-- **Expanded Test Suite**: Unit test suite expanded from 79 to 93 tests, with 11/11 launch-day stress test fixtures passing.
+- **Expanded Test Suite**: Unit test suite expanded from 79 to 94 tests, with 11/11 launch-day stress test fixtures passing.

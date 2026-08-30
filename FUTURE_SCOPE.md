@@ -4,6 +4,19 @@ This is a running list of features that are explicitly NOT being built now — c
 
 ---
 
+## Reverse Test-to-Source Dependency Mapping (Highest Priority)
+
+Status: Open / Under Evaluation. Blocked on: architecture & integration path.
+
+What it would involve:
+- Closing the single most severe blind spot in DeployProof's core diff-scoping model: when a diff modifies or weakens assertions in a test file (e.g. `tests/test_calculator.py`) without modifying the corresponding application source file (`calculator.py`), diff-scoping currently resolves 0 modified application source files and exits cleanly with 0 mutants evaluated.
+- Implementing reverse dependency mapping from modified test files back to their tested source modules, automatically pulling the affected source files into the mutation scope even if the source files themselves were untouched in the diff.
+- Implementation path: Evaluated in [INVESTIGATION_blastradius.md](INVESTIGATION_blastradius.md) using `blastradius-cli`'s static dependency graph indexer (`blastradius impact` / `blastradius analyze`), invoked via CLI subprocess with `--json` output, or via an internal reverse AST import graph builder.
+
+Why it matters: This is the primary blind spot in diff-scoped mutation testing — an AI agent or developer can delete critical test assertions without triggering a mutation score penalty.
+
+---
+
 ## CI / GitHub PR Integration
 
 Status: Not started. Blocked on: real user demand (see criteria below).
