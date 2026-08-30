@@ -82,7 +82,7 @@ def handle_check(args: argparse.Namespace) -> int:
         for f in target_files:
             try:
                 loc = len(f.read_text(encoding='utf-8', errors='replace').splitlines())
-                if loc < LARGE_FILE_LOC_THRESHOLD:
+                if loc >= LARGE_FILE_LOC_THRESHOLD:
                     try:
                         rel = f.relative_to(repo_root or cwd)
                     except ValueError:

@@ -287,7 +287,7 @@ def test_real_subprocess_os_signal_interrupt_restoration():
     import sys
     import time
 
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         tmp_path = Path(tmpdir).resolve()
         src_file = tmp_path / "calc.py"
         orig_code = (
@@ -368,6 +368,7 @@ def test_real_subprocess_os_signal_interrupt_restoration():
 
         # Target source file MUST be restored to original content immediately
         assert src_file.read_text(encoding="utf-8") == mod_code
+        time.sleep(0.2)
 
 
 def test_restore_removes_pyc_cache_file():

@@ -1,7 +1,7 @@
 # DeployProof Architectural Decisions (DECISIONS.md)
 
 *Document updated: August 30, 2026*  
-*Scope: V1 Diff-Scoping Strategy, Two-Tier Mutation Architecture, Production Hardening & v0.2.0 Safety Guarantees*
+*Scope: V1 Diff-Scoping Strategy, Two-Tier Mutation Architecture, Production Hardening & v0.2.2 Safety Guarantees*
 
 ---
 

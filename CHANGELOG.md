@@ -5,6 +5,12 @@ All notable changes to DeployProof will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-30
+
+### Fixed
+- **CLI Large File Notice Threshold**: Corrected the file-size threshold condition in `cli.py` to `loc >= LARGE_FILE_LOC_THRESHOLD`, eliminating false "large file" warnings on small files.
+- **Windows Cleanup Race Protection**: Hardened temporary directory cleanup in subprocess-heavy tests with `ignore_cleanup_errors=True` and child termination delay to prevent transient file locking errors on Windows.
+
 ## [0.2.1] - 2026-08-30
 
 ### Fixed
