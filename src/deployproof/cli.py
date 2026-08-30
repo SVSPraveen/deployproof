@@ -6,7 +6,7 @@ from typing import List, Optional
 from deployproof import __version__
 from deployproof.dependencies import extract_all_new_dependencies, scan_dependencies
 from deployproof.control_flow import scan_session_files_for_control_flow
-from deployproof.diff import DiffScopeError, InvalidBaseRefError, NotAGitRepositoryError, get_git_root, is_test_file, resolve_changed_python_files, resolve_changed_session_files
+from deployproof.diff import DiffScopeError, InvalidBaseRefError, NotAGitRepositoryError, get_git_root, is_test_file, resolve_changed_python_files, resolve_changed_session_files, resolve_full_repo_session_files
 from deployproof.mocks import scan_session_files_for_mocks
 from deployproof.mutator import run_mutation_tests
 from deployproof.reporter import LARGE_FILE_LOC_THRESHOLD, format_json_report, format_report
@@ -20,6 +20,8 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument('-v', '--version', action='version', version=f'%(prog)s {__version__}', help="Show program's version number and exit.")
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     check_parser = subparsers.add_parser('check', help='Run deployability verification checks against session changes.')
+    check_parser.add_argument('--full-repo', action='store_true', default=False, help='Scan all files in repository respecting .gitignore instead of diff-scoped session files.')
+    check_parser.add_argument('--workers', type=int, default=None, help='Number of parallel worker processes for --full-repo scan (default: auto, up to 8).')
     check_parser.add_argument('--base', type=str, default=None, help='Base git ref (branch/commit/tag) to diff against.')
     check_parser.add_argument('--files', nargs='+', type=str, default=None, help='Explicit files to evaluate (bypasses git diff).')
     check_parser.add_argument('--tests', nargs='+', type=str, default=None, help='Specific test file(s) or directories to execute.')
@@ -36,6 +38,7 @@ def handle_check(args: argparse.Namespace) -> int:
     """Handle the 'check' subcommand."""
     cwd = Path.cwd().resolve()
     repo_root: Optional[Path] = None
+    is_full_repo = getattr(args, 'full_repo', False)
     try:
         if args.files:
             session_files = [Path(f).resolve() for f in args.files]
@@ -46,6 +49,14 @@ def handle_check(args: argparse.Namespace) -> int:
                     repo_root = session_files[0].parent
             else:
                 repo_root = cwd
+        elif is_full_repo:
+            try:
+                repo_root = get_git_root(cwd)
+            except DiffScopeError:
+                repo_root = cwd
+            if not getattr(args, 'json', False):
+                print('Notice: Full repo scan active — evaluating all repository files (this may take significantly longer than a diff-scoped check).\n')
+            session_files = resolve_full_repo_session_files(cwd=cwd)
         else:
             repo_root = get_git_root(cwd)
             session_files = resolve_changed_session_files(cwd=cwd, base=args.base)
@@ -69,10 +80,10 @@ def handle_check(args: argparse.Namespace) -> int:
             return 0
     symlink_result = scan_session_files_for_symlinks(session_files, repo_root=repo_root or cwd)
     secrets_result = scan_session_files_for_secrets(session_files)
-    extracted_deps = extract_all_new_dependencies(session_files, root=repo_root or cwd, base=args.base)
+    extracted_deps = extract_all_new_dependencies(session_files, root=repo_root or cwd, base=args.base, full_repo=is_full_repo)
     dependency_result = scan_dependencies(extracted_deps)
-    mock_result = scan_session_files_for_mocks(session_files=session_files, root=repo_root or cwd, base=args.base)
-    control_flow_result = scan_session_files_for_control_flow(session_files=session_files, root=repo_root or cwd, base=args.base)
+    mock_result = scan_session_files_for_mocks(session_files=session_files, root=repo_root or cwd, base=args.base, full_repo=is_full_repo)
+    control_flow_result = scan_session_files_for_control_flow(session_files=session_files, root=repo_root or cwd, base=args.base, full_repo=is_full_repo)
     if args.files:
         non_test_files = [f for f in session_files if f.is_file() and f.suffix == '.py' and (not is_test_file(f))]
         target_files = non_test_files if non_test_files else [f for f in session_files if f.is_file() and f.suffix == '.py']
@@ -107,7 +118,15 @@ def handle_check(args: argparse.Namespace) -> int:
         elif not getattr(args, 'json', False):
             print(wsl_msg)
             print('-' * 68)
-    result = run_mutation_tests(target_files=target_files, repo_root=repo_root or cwd, test_runner_timeout=args.timeout, extra_pytest_args=args.tests)
+    result = run_mutation_tests(
+        target_files=target_files,
+        repo_root=repo_root or cwd,
+        test_runner_timeout=args.timeout,
+        extra_pytest_args=args.tests,
+        workers=getattr(args, 'workers', None),
+        is_full_repo=is_full_repo,
+        quiet=getattr(args, 'json', False),
+    )
     if getattr(args, 'json', False):
         report_text = format_json_report(result=result, target_files=target_files, secrets_result=secrets_result, symlink_result=symlink_result, dependency_result=dependency_result, mock_result=mock_result, control_flow_result=control_flow_result, strict_mocks=getattr(args, 'strict_mocks', False), strict_error_handling=getattr(args, 'strict_error_handling', False), repo_root=repo_root or cwd, threshold=args.threshold, version=__version__)
     else:

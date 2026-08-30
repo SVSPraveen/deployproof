@@ -5,6 +5,17 @@ All notable changes to DeployProof will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Full Repository Audit Mode (`--full-repo`)**: Added `--full-repo` flag to `deployproof check` to evaluate all tracked non-ignored files across the repository root instead of diff-scoped changes.
+- **Isolated Multi-Worker Parallel Engine**: Added `ProcessPoolExecutor`-based parallelization for `--full-repo` mode with `--workers` flag. Each worker executes in an isolated PID-keyed filesystem sandbox (`worker_{pid}`) with independent pytest cache (`cache_dir`) and temp directories (`--basetemp`), eliminating cross-worker file lock and mutation race conditions.
+- **Live Progress Reporting**: Live progress output (`[X/Y mutants | A/B files] elapsed: MmSSs`) during full repository mutation runs.
+
+### Fixed
+- **Traceback-Anchored Mutant Kill Classification**: Runner-error mutants (`exit code 1`) are reclassified as `KILLED` only if the error traceback explicitly anchors to the mutated source file and line. Generic or unanchored environment errors remain as `RUNNER_ERROR` and are displayed separately.
+- **Score Fraction Formatting**: Corrected mutation score fraction display in reporter to truthfully reflect valid mutants killed versus excluded runner errors (e.g. `(4/4 valid mutants killed, 1 error excluded)`).
+
 ## [0.2.2] - 2026-08-30
 
 ### Fixed

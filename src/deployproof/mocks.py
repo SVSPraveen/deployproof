@@ -212,9 +212,10 @@ def scan_test_file_for_mocks(
     file_path: Path,
     root: Optional[Path] = None,
     base: Optional[str] = None,
+    full_repo: bool = False,
 ) -> List[MockFinding]:
-    """Scan a single test file for newly introduced mock usages."""
-    if not file_path.is_file():
+    """Scan an individual test file for mock introduction."""
+    if not file_path.is_file() or file_path.suffix != ".py":
         return []
 
     try:
@@ -228,7 +229,7 @@ def scan_test_file_for_mocks(
         return []
 
     modified_lines: Optional[Set[int]] = None
-    if root:
+    if root and not full_repo:
         try:
             modified_lines = get_modified_line_ranges(file_path, root, base=base)
         except Exception:
@@ -243,13 +244,14 @@ def scan_session_files_for_mocks(
     session_files: List[Path],
     root: Optional[Path] = None,
     base: Optional[str] = None,
+    full_repo: bool = False,
 ) -> MockScanSummary:
     """Scan all test files in session_files for newly introduced mock usages."""
     test_files = [f for f in session_files if f.is_file() and f.suffix == ".py" and is_test_file(f)]
     all_findings: List[MockFinding] = []
 
     for tf in test_files:
-        findings = scan_test_file_for_mocks(tf, root=root, base=base)
+        findings = scan_test_file_for_mocks(tf, root=root, base=base, full_repo=full_repo)
         all_findings.extend(findings)
 
     return MockScanSummary(

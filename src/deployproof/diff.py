@@ -288,4 +288,51 @@ def get_modified_line_ranges(
     return modified_lines
 
 
+def resolve_full_repo_session_files(cwd: Optional[Path] = None) -> List[Path]:
+    """
+    Resolve all non-ignored files across the repository for full-repo verification (--full-repo).
+    Respects .gitignore via git ls-files if inside a git repository, or walks tree filtering IGNORED_DIRS.
+    """
+    target_dir = (cwd or Path.cwd()).resolve()
+    if is_git_repo(target_dir):
+        root = get_git_root(target_dir)
+        res = run_git(["ls-files", "-c", "-o", "--exclude-standard"], root)
+        if res.returncode == 0:
+            files: List[Path] = []
+            for line in res.stdout.splitlines():
+                rel_path = line.strip().strip('"')
+                if not rel_path:
+                    continue
+                p = (root / rel_path).resolve()
+                if not p.is_file():
+                    continue
+                try:
+                    rel_parts = set(p.relative_to(root).parts)
+                except ValueError:
+                    rel_parts = set(p.parts)
+                if rel_parts.intersection(IGNORED_DIRS):
+                    continue
+                files.append(p)
+            return sorted(files)
+
+    # Fallback if not git repo or git command failed
+    try:
+        root = get_git_root(target_dir)
+    except DiffScopeError:
+        root = target_dir
+
+    files = []
+    for p in root.rglob("*"):
+        if p.is_file():
+            try:
+                rel_parts = set(p.relative_to(root).parts)
+            except ValueError:
+                rel_parts = set(p.parts)
+            if rel_parts.intersection(IGNORED_DIRS):
+                continue
+            files.append(p.resolve())
+    return sorted(files)
+
+
+
 

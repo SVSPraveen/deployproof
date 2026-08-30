@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -452,6 +452,27 @@ def extract_collection_error(output: str, returncode: int) -> str:
         return lines[-1]
     return f'Pytest exited with return code {returncode}'
 
+
+def _error_traces_to_mutant(output: str, mutant: Mutant) -> bool:
+    """
+    Determine if a pytest error or traceback specifically references the mutated file or code path.
+    Returns True if the mutated filename/stem is referenced in the traceback/call stack.
+    Returns False if the error is an unanchored, generic, or unrelated environment crash.
+    """
+    fname = mutant.file_path.name
+    fstem = mutant.file_path.stem
+    for line in output.splitlines():
+        line_clean = line.strip()
+        if not line_clean:
+            continue
+        if fname in line_clean or f"\\{fname}" in line_clean or f"/{fname}" in line_clean:
+            return True
+        # Also check if the module stem is part of traceback frame import or definition
+        if fstem in line_clean and any(marker in line_clean for marker in ['File "', '.py:', '.py", line', '>>>', 'E   ', 'ERROR', 'setup of']):
+            return True
+    return False
+
+
 def collect_skipped_constructs_for_file(file_path: Path) -> List[SkippedConstruct]:
     """Identify unsupported constructs in a file that Tier 1 skips."""
     try:
@@ -583,175 +604,756 @@ def discover_target_tests(target_files: List[Path], root: Path) -> List[str]:
                                 matched_test_files.append(rel)
     return matched_test_files
 
-def run_mutation_tests(target_files: List[Path], repo_root: Optional[Path]=None, test_runner_timeout: float=10.0, extra_pytest_args: Optional[List[str]]=None) -> MutationResult:
+
+def _cleanup_pyc_in_dir(directory: Path) -> None:
+    """Remove bytecode caches and .pyc files in the given directory."""
+    pycache = directory / "__pycache__"
+    if pycache.is_dir():
+        try:
+            shutil.rmtree(pycache, ignore_errors=True)
+        except Exception:
+            pass
+    for pyc in directory.glob("*.pyc"):
+        try:
+            pyc.unlink(missing_ok=True)
+        except Exception:
+            pass
+
+
+def _run_single_mutant_in_sandbox(
+    temp_base_str: str,
+    snapshot_dir_str: str,
+    rel_file_path_str: str,
+    mutant_id: str,
+    line_number: int,
+    description: str,
+    original_line: str,
+    mutated_line: str,
+    mutated_source: str,
+    pytest_args: List[str],
+    baseline_errors: int,
+    effective_timeout: float,
+    env_pythonpath: str,
+) -> Dict[str, Any]:
     """
-    Execute mutation testing across the specified target files.
+    Execute a single mutant in a PID-isolated worker sandbox directory.
+    
+    Guarantees 100% process isolation without cross-worker file race conditions.
+    Each worker process maintains its own private directory cloned from a clean snapshot.
+    Restores sandbox file state after test execution.
     """
-    root = (repo_root or Path.cwd()).resolve()
-    start_time = time.time()
-    all_mutants: List[Mutant] = []
-    all_skipped: List[SkippedConstruct] = []
-    for f in target_files:
-        if f.is_file() and f.suffix == '.py':
-            all_mutants.extend(generate_mutants_for_file(f))
-            all_skipped.extend(collect_skipped_constructs_for_file(f))
-    if not all_mutants:
-        return MutationResult(total_mutants=0, killed_mutants=0, survived_mutants=[], untested_files=[], runner_errors=[], skipped_constructs=all_skipped, mutation_score=100.0, duration_seconds=round(time.time() - start_time, 2), files_tested=target_files)
-    killed_count = 0
-    survived: List[Mutant] = []
-    runner_errors: List[Tuple[Mutant, str]] = []
-    untested_files_set: Set[Path] = set()
-    env = os.environ.copy()
-    env['PYTHONDONTWRITEBYTECODE'] = '1'
-    current_pythonpath = env.get('PYTHONPATH', '')
-    paths_to_add = [str(root)]
-    if (root / 'src').is_dir():
-        paths_to_add.append(str(root / 'src'))
-    new_pythonpath = os.pathsep.join(paths_to_add)
-    if current_pythonpath:
-        new_pythonpath = f'{new_pythonpath}{os.pathsep}{current_pythonpath}'
-    env['PYTHONPATH'] = new_pythonpath
-    if extra_pytest_args:
-        pytest_args = list(extra_pytest_args)
-    else:
-        targeted_tests = discover_target_tests(target_files, root)
-        pytest_args = targeted_tests if targeted_tests else []
-    pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=short', '-p', 'no:cacheprovider'] + pytest_args
-    baseline_has_no_tests = False
-    baseline_duration = 1.0
-    baseline_summary: Dict[str, Any] = {}
+    temp_base = Path(temp_base_str)
+    snapshot_dir = Path(snapshot_dir_str)
+    worker_dir = temp_base / f"worker_{os.getpid()}"
+
+    if not worker_dir.is_dir():
+        try:
+            shutil.copytree(snapshot_dir, worker_dir)
+        except Exception as e:
+            return {
+                "mutant_id": mutant_id,
+                "status": "RUNNER_ERROR",
+                "error_msg": f"Failed initializing worker sandbox from snapshot: {e}",
+            }
+
+    target_file = worker_dir / rel_file_path_str
     try:
-        t0 = time.time()
-        baseline_timeout = max(test_runner_timeout * 3.0, 45.0, len(pytest_args) * 15.0 if pytest_args else 30.0)
-        baseline_res = subprocess.run(
-            pytest_cmd,
-            cwd=root,
+        original_code = target_file.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return {
+            "mutant_id": mutant_id,
+            "status": "RUNNER_ERROR",
+            "error_msg": f"Failed reading source file in sandbox: {e}",
+        }
+
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    paths_to_add = []
+    if (worker_dir / "src").is_dir():
+        paths_to_add.append(str(worker_dir / "src"))
+    paths_to_add.append(str(worker_dir))
+    if env_pythonpath:
+        paths_to_add.append(env_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(paths_to_add)
+
+    worker_cache = worker_dir / ".pytest_cache"
+    worker_tmp = worker_dir / ".pytest_tmp"
+    cmd = [
+        sys.executable,
+        "-B",
+        "-m",
+        "pytest",
+        "-q",
+        "--tb=no",
+        "-o",
+        f"cache_dir={worker_cache}",
+        f"--basetemp={worker_tmp}",
+    ]
+    if baseline_errors == 0:
+        cmd.append("-x")
+    cmd.extend(pytest_args)
+
+    status = "SURVIVED"
+    error_msg = None
+
+    try:
+        target_file.write_text(mutated_source, encoding="utf-8")
+        res = subprocess.run(
+            cmd,
+            cwd=worker_dir,
             env=env,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=baseline_timeout,
+            timeout=effective_timeout,
         )
-        baseline_duration = max(time.time() - t0, 0.5)
-        combined_output = baseline_res.stdout + "\n" + baseline_res.stderr
-        baseline_summary = parse_pytest_summary(combined_output)
-        is_collection_error = (
-            baseline_res.returncode in (2, 3, 4)
-            or "modulenotfounderror" in combined_output.lower()
-            or "importerror" in combined_output.lower()
-            or ("error during collection" in combined_output.lower())
-            or ("error while loading conftest" in combined_output.lower())
-            or ("zoneinfonotfounderror" in combined_output.lower())
-            or (
-                baseline_summary.get("errors", 0) > 0
-                and baseline_summary.get("passed", 0) == 0
-                and (baseline_summary.get("failed", 0) == 0)
+        combined_out = res.stdout + "\n" + res.stderr
+        mut_summary = parse_pytest_summary(combined_out)
+        mut_failed = mut_summary.get("failed", 0)
+        mut_passed = mut_summary.get("passed", 0)
+        mut_errors = mut_summary.get("errors", 0)
+
+        if res.returncode == 5 or mut_summary["no_tests_ran"]:
+            status = "SURVIVED"
+        elif mut_failed > 0:
+            status = "KILLED"
+        elif mut_errors > baseline_errors or (res.returncode == 1 and mut_passed == 0 and mut_failed == 0):
+            temp_mutant = Mutant(
+                mutant_id=mutant_id,
+                file_path=Path(rel_file_path_str),
+                line_number=line_number,
+                description=description,
+                original_line=original_line,
+                mutated_line=mutated_line,
+                mutated_source=mutated_source,
             )
-        )
-        if is_collection_error:
-            err_msg = extract_collection_error(combined_output, baseline_res.returncode)
-            return MutationResult(
-                total_mutants=len(all_mutants),
-                killed_mutants=0,
-                survived_mutants=[],
-                untested_files=[],
-                runner_errors=[],
-                skipped_constructs=all_skipped,
-                mutation_score=None,
-                duration_seconds=round(time.time() - start_time, 2),
-                files_tested=target_files,
-                collection_error=err_msg,
-            )
-        if baseline_res.returncode == 5 or baseline_summary["no_tests_ran"]:
-            if pytest_args:
-                fallback_timeout = max(test_runner_timeout * 3.0, 45.0)
-                fallback_res = subprocess.run(
-                    [sys.executable, "-B", "-m", "pytest", "-q", "--tb=short", "-p", "no:cacheprovider"],
+            if _error_traces_to_mutant(combined_out, temp_mutant):
+                status = "KILLED"
+            else:
+                status = "RUNNER_ERROR"
+                concise = extract_collection_error(combined_out, res.returncode)
+                error_msg = f"Pytest exit code {res.returncode}: {concise}"
+        elif mut_passed > 0 and mut_failed == 0 and mut_errors <= baseline_errors:
+            status = "SURVIVED"
+        elif res.returncode in (2, 3, 4):
+            status = "RUNNER_ERROR"
+            concise = extract_collection_error(combined_out, res.returncode)
+            error_msg = f"Pytest exit code {res.returncode}: {concise}"
+        else:
+            status = "SURVIVED"
+    except subprocess.TimeoutExpired:
+        status = "KILLED"
+    except Exception as e:
+        status = "RUNNER_ERROR"
+        error_msg = f"Execution exception: {type(e).__name__}: {e}"
+    finally:
+        try:
+            target_file.write_text(original_code, encoding="utf-8")
+            _cleanup_pyc_in_dir(target_file.parent)
+        except Exception:
+            pass
+
+    return {
+        "mutant_id": mutant_id,
+        "status": status,
+        "error_msg": error_msg,
+    }
+
+
+def _run_mutation_tests_sequential(
+    target_files: List[Path],
+    repo_root: Optional[Path] = None,
+    test_runner_timeout: float = 10.0,
+    extra_pytest_args: Optional[List[str]] = None,
+) -> MutationResult:
+    """
+    Execute targeted sequential mutation testing across target files (diff-scoped mode).
+    """
+    root = (repo_root or Path.cwd()).resolve()
+    start_time = time.time()
+    file_mutants_map: Dict[Path, List[Mutant]] = {}
+    all_skipped: List[SkippedConstruct] = []
+    total_mutants_count = 0
+
+    for f in target_files:
+        if f.is_file() and f.suffix == '.py':
+            f_mutants = generate_mutants_for_file(f)
+            file_mutants_map[f] = f_mutants
+            total_mutants_count += len(f_mutants)
+            all_skipped.extend(collect_skipped_constructs_for_file(f))
+
+    if total_mutants_count == 0:
+        return MutationResult(total_mutants=0, killed_mutants=0, survived_mutants=[], untested_files=[], runner_errors=[], skipped_constructs=all_skipped, mutation_score=100.0, duration_seconds=round(time.time() - start_time, 2), files_tested=target_files)
+
+    killed_count = 0
+    survived: List[Mutant] = []
+    runner_errors: List[Tuple[Mutant, str]] = []
+    untested_files_set: Set[Path] = set()
+
+    env = os.environ.copy()
+    env['PYTHONDONTWRITEBYTECODE'] = '1'
+    current_pythonpath = env.get('PYTHONPATH', '')
+    paths_to_add = []
+    if (root / 'src').is_dir():
+        paths_to_add.append(str(root / 'src'))
+    paths_to_add.append(str(root))
+    new_pythonpath = os.pathsep.join(paths_to_add)
+    if current_pythonpath:
+        new_pythonpath = f'{new_pythonpath}{os.pathsep}{current_pythonpath}'
+    env['PYTHONPATH'] = new_pythonpath
+
+    global _CURRENT_MUTATED_FILE, _CURRENT_ORIGINAL_CONTENT
+    install_mutation_signal_handlers()
+
+    try:
+        for f, mutants in file_mutants_map.items():
+            if not mutants:
+                continue
+
+            if extra_pytest_args:
+                pytest_args = list(extra_pytest_args)
+            else:
+                targeted_tests = discover_target_tests([f], root)
+                pytest_args = targeted_tests if targeted_tests else []
+
+            if not pytest_args:
+                untested_files_set.add(f)
+                for mutant in mutants:
+                    mutant.status = 'SURVIVED'
+                    survived.append(mutant)
+                continue
+
+            pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=short', '-p', 'no:cacheprovider'] + pytest_args
+            t0 = time.time()
+            baseline_timeout = max(test_runner_timeout * 3.0, 45.0, len(pytest_args) * 15.0)
+
+            try:
+                baseline_res = subprocess.run(
+                    pytest_cmd,
                     cwd=root,
                     env=env,
                     capture_output=True,
                     text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=fallback_timeout,
+                    encoding='utf-8',
+                    errors='replace',
+                    timeout=baseline_timeout,
                 )
-                fb_combined = fallback_res.stdout + '\n' + fallback_res.stderr
-                fb_summary = parse_pytest_summary(fb_combined)
-                is_fb_collection_error = fallback_res.returncode in (2, 3, 4) or 'modulenotfounderror' in fb_combined.lower() or 'importerror' in fb_combined.lower() or ('error during collection' in fb_combined.lower()) or ('error while loading conftest' in fb_combined.lower()) or ('zoneinfonotfounderror' in fb_combined.lower()) or (fb_summary.get('errors', 0) > 0 and fb_summary.get('passed', 0) == 0 and (fb_summary.get('failed', 0) == 0))
-                if is_fb_collection_error:
-                    err_msg = extract_collection_error(fb_combined, fallback_res.returncode)
-                    return MutationResult(total_mutants=len(all_mutants), killed_mutants=0, survived_mutants=[], untested_files=[], runner_errors=[], skipped_constructs=all_skipped, mutation_score=None, duration_seconds=round(time.time() - start_time, 2), files_tested=target_files, collection_error=err_msg)
-                if fallback_res.returncode == 5 or fb_summary['no_tests_ran']:
-                    baseline_has_no_tests = True
-                    untested_files_set.update(target_files)
-                else:
-                    pytest_args = []
-                    baseline_summary = fb_summary
-            else:
-                baseline_has_no_tests = True
-                untested_files_set.update(target_files)
-    except Exception as e:
-        return MutationResult(total_mutants=len(all_mutants), killed_mutants=0, survived_mutants=[], untested_files=[], runner_errors=[], skipped_constructs=all_skipped, mutation_score=None, duration_seconds=round(time.time() - start_time, 2), files_tested=target_files, collection_error=f'Execution exception during baseline test run: {type(e).__name__}: {e}')
-    effective_timeout = max(test_runner_timeout, baseline_duration * 3.0 + 5.0)
-    if baseline_has_no_tests:
-        for mutant in all_mutants:
-            mutant.status = 'SURVIVED'
-            survived.append(mutant)
-        return MutationResult(total_mutants=len(all_mutants), killed_mutants=0, survived_mutants=survived, untested_files=sorted(untested_files_set), runner_errors=[], skipped_constructs=all_skipped, mutation_score=0.0, duration_seconds=round(time.time() - start_time, 2), files_tested=target_files)
-    baseline_has_errors = baseline_summary.get('errors', 0) > 0
-    mutant_pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=no', '-p', 'no:cacheprovider']
-    if not baseline_has_errors:
-        mutant_pytest_cmd.append('-x')
-    mutant_pytest_cmd.extend(pytest_args)
-    global _CURRENT_MUTATED_FILE, _CURRENT_ORIGINAL_CONTENT
-    install_mutation_signal_handlers()
-    try:
-        for mutant in all_mutants:
-            original_code = mutant.file_path.read_text(encoding='utf-8', errors='replace')
-            _CURRENT_MUTATED_FILE = mutant.file_path
-            _CURRENT_ORIGINAL_CONTENT = original_code
-            try:
-                mutant.file_path.write_text(mutant.mutated_source, encoding='utf-8')
-                res = subprocess.run(mutant_pytest_cmd, cwd=root, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=effective_timeout)
-                combined_out = res.stdout + '\n' + res.stderr
-                mut_summary = parse_pytest_summary(combined_out)
-                baseline_errors = baseline_summary.get('errors', 0)
-                mut_failed = mut_summary.get('failed', 0)
-                mut_passed = mut_summary.get('passed', 0)
-                mut_errors = mut_summary.get('errors', 0)
-                if res.returncode == 5 or mut_summary['no_tests_ran']:
+            except Exception as e:
+                return MutationResult(
+                    total_mutants=total_mutants_count,
+                    killed_mutants=killed_count,
+                    survived_mutants=survived,
+                    untested_files=sorted(untested_files_set),
+                    runner_errors=runner_errors,
+                    skipped_constructs=all_skipped,
+                    mutation_score=None,
+                    duration_seconds=round(time.time() - start_time, 2),
+                    files_tested=target_files,
+                    collection_error=f'Execution exception during baseline test run: {type(e).__name__}: {e}',
+                )
+
+            baseline_duration = max(time.time() - t0, 0.5)
+            combined_output = baseline_res.stdout + '\n' + baseline_res.stderr
+            baseline_summary = parse_pytest_summary(combined_output)
+
+            is_collection_error = (
+                baseline_res.returncode in (2, 3, 4)
+                or 'modulenotfounderror' in combined_output.lower()
+                or 'importerror' in combined_output.lower()
+                or ('error during collection' in combined_output.lower())
+                or ('error while loading conftest' in combined_output.lower())
+                or ('zoneinfonotfounderror' in combined_output.lower())
+                or (
+                    baseline_summary.get('errors', 0) > 0
+                    and baseline_summary.get('passed', 0) == 0
+                    and (baseline_summary.get('failed', 0) == 0)
+                )
+            )
+            if is_collection_error:
+                err_msg = extract_collection_error(combined_output, baseline_res.returncode)
+                return MutationResult(
+                    total_mutants=total_mutants_count,
+                    killed_mutants=killed_count,
+                    survived_mutants=survived,
+                    untested_files=sorted(untested_files_set),
+                    runner_errors=runner_errors,
+                    skipped_constructs=all_skipped,
+                    mutation_score=None,
+                    duration_seconds=round(time.time() - start_time, 2),
+                    files_tested=target_files,
+                    collection_error=err_msg,
+                )
+
+            if baseline_res.returncode == 5 or baseline_summary['no_tests_ran']:
+                untested_files_set.add(f)
+                for mutant in mutants:
                     mutant.status = 'SURVIVED'
                     survived.append(mutant)
-                elif mut_failed > 0:
+                continue
+
+            effective_timeout = max(test_runner_timeout, baseline_duration * 3.0 + 5.0)
+            baseline_has_errors = baseline_summary.get('errors', 0) > 0
+            mutant_pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=no', '-p', 'no:cacheprovider']
+            if not baseline_has_errors:
+                mutant_pytest_cmd.append('-x')
+            mutant_pytest_cmd.extend(pytest_args)
+
+            for mutant in mutants:
+                original_code = mutant.file_path.read_text(encoding='utf-8', errors='replace')
+                _CURRENT_MUTATED_FILE = mutant.file_path
+                _CURRENT_ORIGINAL_CONTENT = original_code
+                try:
+                    mutant.file_path.write_text(mutant.mutated_source, encoding='utf-8')
+                    res = subprocess.run(
+                        mutant_pytest_cmd,
+                        cwd=root,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        encoding='utf-8',
+                        errors='replace',
+                        timeout=effective_timeout,
+                    )
+                    combined_out = res.stdout + '\n' + res.stderr
+                    mut_summary = parse_pytest_summary(combined_out)
+                    baseline_errors = baseline_summary.get('errors', 0)
+                    mut_failed = mut_summary.get('failed', 0)
+                    mut_passed = mut_summary.get('passed', 0)
+                    mut_errors = mut_summary.get('errors', 0)
+
+                    if res.returncode == 5 or mut_summary['no_tests_ran']:
+                        mutant.status = 'SURVIVED'
+                        survived.append(mutant)
+                    elif mut_failed > 0:
+                        mutant.status = 'KILLED'
+                        killed_count += 1
+                    elif mut_errors > baseline_errors or (res.returncode == 1 and mut_passed == 0 and mut_failed == 0):
+                        if _error_traces_to_mutant(combined_out, mutant):
+                            mutant.status = 'KILLED'
+                            killed_count += 1
+                        else:
+                            mutant.status = 'RUNNER_ERROR'
+                            concise_err = extract_collection_error(combined_out, res.returncode)
+                            err_msg = f'Pytest exit code {res.returncode}: {concise_err}'
+                            runner_errors.append((mutant, err_msg))
+                    elif mut_passed > 0 and mut_failed == 0 and mut_errors <= baseline_errors:
+                        mutant.status = 'SURVIVED'
+                        survived.append(mutant)
+                    elif res.returncode in (2, 3, 4):
+                        mutant.status = 'RUNNER_ERROR'
+                        concise_err = extract_collection_error(combined_out, res.returncode)
+                        err_msg = f'Pytest exit code {res.returncode}: {concise_err}'
+                        runner_errors.append((mutant, err_msg))
+                    else:
+                        mutant.status = 'SURVIVED'
+                        survived.append(mutant)
+                except subprocess.TimeoutExpired:
                     mutant.status = 'KILLED'
                     killed_count += 1
-                elif mut_passed > 0 and mut_failed == 0:
-                    mutant.status = 'SURVIVED'
-                    survived.append(mutant)
-                elif mut_errors > baseline_errors or res.returncode in (2, 3, 4):
+                except Exception as e:
                     mutant.status = 'RUNNER_ERROR'
-                    err_msg = f'Pytest exit code {res.returncode}: {res.stderr.strip() or res.stdout.strip()}'
-                    runner_errors.append((mutant, err_msg))
-                else:
-                    mutant.status = 'SURVIVED'
-                    survived.append(mutant)
-            except subprocess.TimeoutExpired:
-                mutant.status = 'KILLED'
-                killed_count += 1
-            except Exception as e:
-                mutant.status = 'RUNNER_ERROR'
-                runner_errors.append((mutant, f'Execution exception: {type(e).__name__}: {e}'))
-            finally:
-                mutant.file_path.write_text(original_code, encoding='utf-8')
-                _CURRENT_MUTATED_FILE = None
-                _CURRENT_ORIGINAL_CONTENT = None
+                    runner_errors.append((mutant, f'Execution exception: {type(e).__name__}: {e}'))
+                finally:
+                    mutant.file_path.write_text(original_code, encoding='utf-8')
+                    _CURRENT_MUTATED_FILE = None
+                    _CURRENT_ORIGINAL_CONTENT = None
     finally:
         _restore_current_mutant_file()
         remove_mutation_signal_handlers()
+
     valid_mutants_count = killed_count + len(survived)
     if valid_mutants_count > 0:
         score = killed_count / valid_mutants_count * 100.0
     else:
         score = 0.0 if untested_files_set else 100.0
-    return MutationResult(total_mutants=len(all_mutants), killed_mutants=killed_count, survived_mutants=survived, untested_files=sorted(untested_files_set), runner_errors=runner_errors, skipped_constructs=all_skipped, mutation_score=round(score, 1), duration_seconds=round(time.time() - start_time, 2), files_tested=target_files)
+
+    return MutationResult(
+        total_mutants=total_mutants_count,
+        killed_mutants=killed_count,
+        survived_mutants=survived,
+        untested_files=sorted(untested_files_set),
+        runner_errors=runner_errors,
+        skipped_constructs=all_skipped,
+        mutation_score=round(score, 1),
+        duration_seconds=round(time.time() - start_time, 2),
+        files_tested=target_files,
+    )
+
+
+def run_mutation_tests_parallel(
+    target_files: List[Path],
+    repo_root: Optional[Path] = None,
+    test_runner_timeout: float = 10.0,
+    extra_pytest_args: Optional[List[str]] = None,
+    workers: Optional[int] = None,
+    quiet: bool = False,
+) -> MutationResult:
+    """
+    Execute mutation testing across target files using an isolated multi-worker ProcessPoolExecutor.
+    
+    Each worker executes in its own isolated filesystem sandbox with live progress tracking.
+    """
+    root = (repo_root or Path.cwd()).resolve()
+    start_time = time.time()
+
+    # 1. Determine worker count (sane cap at 8 by default)
+    max_workers = min(os.cpu_count() or 4, 8)
+    if workers is not None and workers > 0:
+        actual_workers = min(workers, 32)
+    else:
+        actual_workers = max_workers
+
+    # 2. Collect mutants and skipped constructs
+    file_mutants_map: Dict[Path, List[Mutant]] = {}
+    all_skipped: List[SkippedConstruct] = []
+    total_mutants_count = 0
+
+    for f in target_files:
+        if f.is_file() and f.suffix == '.py':
+            f_mutants = generate_mutants_for_file(f)
+            file_mutants_map[f] = f_mutants
+            total_mutants_count += len(f_mutants)
+            all_skipped.extend(collect_skipped_constructs_for_file(f))
+
+    if total_mutants_count == 0:
+        return MutationResult(
+            total_mutants=0,
+            killed_mutants=0,
+            survived_mutants=[],
+            untested_files=[],
+            runner_errors=[],
+            skipped_constructs=all_skipped,
+            mutation_score=100.0,
+            duration_seconds=round(time.time() - start_time, 2),
+            files_tested=target_files,
+        )
+
+    # 3. Discover targeted tests per file and identify untested files
+    file_test_map: Dict[Path, List[str]] = {}
+    untested_files_set: Set[Path] = set()
+    tested_files: List[Path] = []
+
+    for f, mutants in file_mutants_map.items():
+        if not mutants:
+            continue
+        if extra_pytest_args:
+            pytest_args = list(extra_pytest_args)
+        else:
+            targeted = discover_target_tests([f], root)
+            pytest_args = targeted if targeted else []
+
+        if not pytest_args:
+            untested_files_set.add(f)
+            for m in mutants:
+                m.status = 'SURVIVED'
+        else:
+            file_test_map[f] = pytest_args
+            tested_files.append(f)
+
+    if not tested_files:
+        all_survived = [m for mutants in file_mutants_map.values() for m in mutants]
+        return MutationResult(
+            total_mutants=total_mutants_count,
+            killed_mutants=0,
+            survived_mutants=all_survived,
+            untested_files=sorted(untested_files_set),
+            runner_errors=[],
+            skipped_constructs=all_skipped,
+            mutation_score=0.0,
+            duration_seconds=round(time.time() - start_time, 2),
+            files_tested=target_files,
+        )
+
+    # 4. Prepare worker sandboxes in temp directory
+    temp_dir_obj = tempfile.TemporaryDirectory(prefix="deployproof_workers_")
+    temp_base = Path(temp_dir_obj.name)
+
+    env_pythonpath = os.environ.get("PYTHONPATH", "")
+    from deployproof.diff import resolve_full_repo_session_files
+    all_repo_session_files = resolve_full_repo_session_files(cwd=root)
+
+    try:
+        if not quiet:
+            print(f"DeployProof: Initializing {actual_workers} isolated parallel workers for full repo mutation scan...", flush=True)
+
+        snapshot_dir = temp_base / "snapshot"
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        for src_file in all_repo_session_files:
+            try:
+                rel_p = src_file.relative_to(root)
+            except ValueError:
+                rel_p = Path(src_file.name)
+            dest_p = snapshot_dir / rel_p
+            dest_p.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_file, dest_p)
+
+        # 5. Baseline runs for unique test suites
+        suite_baseline_cache: Dict[Tuple[str, ...], Tuple[bool, int, float, bool, Optional[str]]] = {}
+        file_baseline_info: Dict[Path, Tuple[int, float]] = {}
+        env_snapshot = os.environ.copy()
+        env_snapshot["PYTHONDONTWRITEBYTECODE"] = "1"
+        paths_to_add = []
+        if (snapshot_dir / "src").is_dir():
+            paths_to_add.append(str(snapshot_dir / "src"))
+        paths_to_add.append(str(snapshot_dir))
+        if env_pythonpath:
+            paths_to_add.append(env_pythonpath)
+        env_snapshot["PYTHONPATH"] = os.pathsep.join(paths_to_add)
+
+        snapshot_cache = snapshot_dir / ".pytest_cache"
+        snapshot_tmp = snapshot_dir / ".pytest_tmp"
+
+        for f in tested_files:
+            pytest_args = file_test_map[f]
+            suite_key = tuple(pytest_args)
+
+            if suite_key not in suite_baseline_cache:
+                t0 = time.time()
+                baseline_timeout = max(test_runner_timeout * 3.0, 45.0, len(pytest_args) * 15.0)
+                pytest_cmd = [
+                    sys.executable,
+                    "-B",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--tb=short",
+                    "-o",
+                    f"cache_dir={snapshot_cache}",
+                    f"--basetemp={snapshot_tmp}",
+                ] + pytest_args
+
+                try:
+                    baseline_res = subprocess.run(
+                        pytest_cmd,
+                        cwd=snapshot_dir,
+                        env=env_snapshot,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=baseline_timeout,
+                    )
+                except Exception as e:
+                    return MutationResult(
+                        total_mutants=total_mutants_count,
+                        killed_mutants=0,
+                        survived_mutants=[],
+                        untested_files=sorted(untested_files_set),
+                        runner_errors=[],
+                        skipped_constructs=all_skipped,
+                        mutation_score=None,
+                        duration_seconds=round(time.time() - start_time, 2),
+                        files_tested=target_files,
+                        collection_error=f"Execution exception during baseline test run: {type(e).__name__}: {e}",
+                    )
+
+                baseline_duration = max(time.time() - t0, 0.5)
+                combined_output = baseline_res.stdout + "\n" + baseline_res.stderr
+                baseline_summary = parse_pytest_summary(combined_output)
+
+                is_collection_error = (
+                    baseline_res.returncode in (2, 3, 4)
+                    or "modulenotfounderror" in combined_output.lower()
+                    or "importerror" in combined_output.lower()
+                    or ("error during collection" in combined_output.lower())
+                    or ("error while loading conftest" in combined_output.lower())
+                    or ("zoneinfonotfounderror" in combined_output.lower())
+                    or (
+                        baseline_summary.get("errors", 0) > 0
+                        and baseline_summary.get("passed", 0) == 0
+                        and (baseline_summary.get("failed", 0) == 0)
+                    )
+                )
+                if is_collection_error:
+                    err_msg = extract_collection_error(combined_output, baseline_res.returncode)
+                    return MutationResult(
+                        total_mutants=total_mutants_count,
+                        killed_mutants=0,
+                        survived_mutants=[],
+                        untested_files=sorted(untested_files_set),
+                        runner_errors=[],
+                        skipped_constructs=all_skipped,
+                        mutation_score=None,
+                        duration_seconds=round(time.time() - start_time, 2),
+                        files_tested=target_files,
+                        collection_error=err_msg,
+                    )
+
+                no_tests = (baseline_res.returncode == 5 or baseline_summary["no_tests_ran"])
+                eff_timeout = max(test_runner_timeout, baseline_duration * 3.0 + 5.0)
+                suite_baseline_cache[suite_key] = (no_tests, baseline_summary.get("errors", 0), eff_timeout, False, None)
+
+            no_tests, base_errors, eff_timeout, _, _ = suite_baseline_cache[suite_key]
+            if no_tests:
+                untested_files_set.add(f)
+                for m in file_mutants_map[f]:
+                    m.status = 'SURVIVED'
+            else:
+                file_baseline_info[f] = (base_errors, eff_timeout)
+
+        # 6. Build list of mutant tasks
+        tasks = []
+        mutants_by_id: Dict[str, Mutant] = {}
+        temp_base_str = str(temp_base)
+        snapshot_dir_str = str(snapshot_dir)
+
+        for f, mutants in file_mutants_map.items():
+            if f in untested_files_set or f not in file_baseline_info:
+                continue
+            baseline_errors, effective_timeout = file_baseline_info[f]
+            pytest_args = file_test_map[f]
+            try:
+                rel_f_str = f.relative_to(root).as_posix()
+            except ValueError:
+                rel_f_str = f.name
+
+            for m in mutants:
+                mutants_by_id[m.mutant_id] = m
+                tasks.append((
+                    temp_base_str,
+                    snapshot_dir_str,
+                    rel_f_str,
+                    m.mutant_id,
+                    m.line_number,
+                    m.description,
+                    m.original_line,
+                    m.mutated_line,
+                    m.mutated_source,
+                    pytest_args,
+                    baseline_errors,
+                    effective_timeout,
+                    env_pythonpath,
+                ))
+
+        active_mutant_count = len(tasks)
+        total_tested_files_count = len(tested_files) - len(untested_files_set.intersection(set(tested_files)))
+
+        # 7. Execute mutant tasks with ProcessPoolExecutor
+        killed_count = 0
+        survived: List[Mutant] = []
+        runner_errors: List[Tuple[Mutant, str]] = []
+        completed_mutants = 0
+        file_completed_counts: Dict[str, int] = {}
+        file_total_mutants: Dict[str, int] = {}
+        for _, _, rel_f_str, m_id, *_ in tasks:
+            file_total_mutants[rel_f_str] = file_total_mutants.get(rel_f_str, 0) + 1
+
+        completed_files_set: Set[str] = set()
+        last_progress_print = 0.0
+
+        if not quiet and active_mutant_count > 0:
+            print(f"DeployProof: Running {active_mutant_count} mutants across {actual_workers} workers in parallel...", flush=True)
+
+        with ProcessPoolExecutor(max_workers=actual_workers) as executor:
+            future_to_id = {
+                executor.submit(_run_single_mutant_in_sandbox, *task): task[3]
+                for task in tasks
+            }
+
+            for future in as_completed(future_to_id):
+                m_id = future_to_id[future]
+                mutant = mutants_by_id[m_id]
+                completed_mutants += 1
+
+                try:
+                    res_dict = future.result()
+                    m_status = res_dict["status"]
+                    error_msg = res_dict["error_msg"]
+                    mutant.status = m_status
+
+                    if m_status == "KILLED":
+                        killed_count += 1
+                    elif m_status == "SURVIVED":
+                        survived.append(mutant)
+                    elif m_status == "RUNNER_ERROR":
+                        runner_errors.append((mutant, error_msg or "Runner error"))
+                    else:
+                        survived.append(mutant)
+                except Exception as e:
+                    mutant.status = "RUNNER_ERROR"
+                    runner_errors.append((mutant, f"Worker process failure: {type(e).__name__}: {e}"))
+
+                # Track file completion
+                try:
+                    rel_key = mutant.file_path.relative_to(root).as_posix()
+                except ValueError:
+                    rel_key = mutant.file_path.name
+
+                file_completed_counts[rel_key] = file_completed_counts.get(rel_key, 0) + 1
+                if file_completed_counts[rel_key] == file_total_mutants.get(rel_key, 0):
+                    completed_files_set.add(rel_key)
+
+                # Live progress update
+                now = time.time()
+                if not quiet and (now - last_progress_print >= 2.0 or completed_mutants == active_mutant_count):
+                    last_progress_print = now
+                    elapsed = now - start_time
+                    elapsed_str = f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s"
+                    print(
+                        f"  [{completed_mutants}/{active_mutant_count} mutants | {len(completed_files_set)}/{total_tested_files_count} files] elapsed: {elapsed_str}",
+                        flush=True,
+                    )
+
+        if not quiet and active_mutant_count > 0:
+            print("", flush=True)
+
+        for f in untested_files_set:
+            for m in file_mutants_map.get(f, []):
+                survived.append(m)
+
+        valid_mutants_count = killed_count + len(survived)
+        if valid_mutants_count > 0:
+            score = killed_count / valid_mutants_count * 100.0
+        else:
+            score = 0.0 if untested_files_set else 100.0
+
+        return MutationResult(
+            total_mutants=total_mutants_count,
+            killed_mutants=killed_count,
+            survived_mutants=survived,
+            untested_files=sorted(untested_files_set),
+            runner_errors=runner_errors,
+            skipped_constructs=all_skipped,
+            mutation_score=round(score, 1),
+            duration_seconds=round(time.time() - start_time, 2),
+            files_tested=target_files,
+        )
+
+    finally:
+        try:
+            temp_dir_obj.cleanup()
+        except Exception:
+            pass
+
+
+def run_mutation_tests(
+    target_files: List[Path],
+    repo_root: Optional[Path] = None,
+    test_runner_timeout: float = 10.0,
+    extra_pytest_args: Optional[List[str]] = None,
+    workers: Optional[int] = None,
+    is_full_repo: bool = False,
+    quiet: bool = False,
+) -> MutationResult:
+    """
+    Top-level mutation testing router.
+    
+    If in --full-repo mode or multiple workers requested, delegates to isolated ProcessPoolExecutor.
+    Otherwise, executes the fast sequential path for diff-scoped checks.
+    """
+    if is_full_repo or (workers is not None and workers > 1):
+        return run_mutation_tests_parallel(
+            target_files=target_files,
+            repo_root=repo_root,
+            test_runner_timeout=test_runner_timeout,
+            extra_pytest_args=extra_pytest_args,
+            workers=workers,
+            quiet=quiet,
+        )
+    return _run_mutation_tests_sequential(
+        target_files=target_files,
+        repo_root=repo_root,
+        test_runner_timeout=test_runner_timeout,
+        extra_pytest_args=extra_pytest_args,
+    )

@@ -216,6 +216,7 @@ def scan_file_for_control_flow(
     file_path: Path,
     root: Path,
     base: Optional[str] = None,
+    full_repo: bool = False,
 ) -> List[ControlFlowFinding]:
     """Scan a Python file for bare excepts, swallowed exceptions, and unreachable code."""
     if not file_path.is_file() or file_path.suffix != ".py":
@@ -227,7 +228,10 @@ def scan_file_for_control_flow(
     except Exception:
         return []
 
-    modified_lines = get_modified_line_ranges(file_path=file_path, root=root, base=base)
+    if full_repo:
+        modified_lines = None
+    else:
+        modified_lines = get_modified_line_ranges(file_path=file_path, root=root, base=base)
     source_lines = source_code.splitlines()
 
     scanner = ControlFlowScanner(
@@ -243,6 +247,7 @@ def scan_session_files_for_control_flow(
     session_files: List[Path],
     root: Path,
     base: Optional[str] = None,
+    full_repo: bool = False,
 ) -> ControlFlowScanSummary:
     """Scan all modified session Python files for control flow and error handling issues."""
     all_findings: List[ControlFlowFinding] = []
@@ -251,7 +256,7 @@ def scan_session_files_for_control_flow(
     for f in session_files:
         if f.is_file() and f.suffix == ".py":
             scanned_files.append(f)
-            findings = scan_file_for_control_flow(file_path=f, root=root, base=base)
+            findings = scan_file_for_control_flow(file_path=f, root=root, base=base, full_repo=full_repo)
             all_findings.extend(findings)
 
     return ControlFlowScanSummary(

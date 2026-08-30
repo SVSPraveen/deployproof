@@ -500,6 +500,7 @@ def extract_new_imports_from_py_file(
     root: Path,
     local_modules: Set[str],
     base: Optional[str] = None,
+    full_repo: bool = False,
 ) -> List[ExtractedDependency]:
     """
     Extract newly added external imports from a modified or new Python file.
@@ -515,7 +516,7 @@ def extract_new_imports_from_py_file(
     except Exception:
         return []
 
-    added_linenos = get_added_linenos_for_file(file_path, root, base=base)
+    added_linenos = None if full_repo else get_added_linenos_for_file(file_path, root, base=base)
     extracted: List[ExtractedDependency] = []
     seen: Set[str] = set()
 
@@ -778,6 +779,7 @@ def extract_new_manifest_dependencies(
     root: Path,
     local_modules: Optional[Set[str]] = None,
     base: Optional[str] = None,
+    full_repo: bool = False,
 ) -> List[ExtractedDependency]:
     """
     Extract external dependencies from modified manifest files (requirements.txt, pyproject.toml, etc.).
@@ -794,7 +796,7 @@ def extract_new_manifest_dependencies(
     if not (is_requirements or is_pyproject or is_setup_py or is_setup_cfg):
         return []
 
-    added_linenos = get_added_linenos_for_file(file_path, root, base=base)
+    added_linenos = None if full_repo else get_added_linenos_for_file(file_path, root, base=base)
 
     if is_requirements:
         return _parse_requirements_file(
@@ -892,9 +894,10 @@ def extract_all_new_dependencies(
     session_files: List[Path],
     root: Path,
     base: Optional[str] = None,
+    full_repo: bool = False,
 ) -> List[ExtractedDependency]:
     """
-    Extract all newly added external dependencies from modified Python files and manifests in session.
+    Extract all external dependencies from Python files and manifests.
     """
     local_modules = get_local_module_names(root)
     all_deps: List[ExtractedDependency] = []
@@ -902,14 +905,14 @@ def extract_all_new_dependencies(
 
     for p in session_files:
         if p.suffix == ".py":
-            py_deps = extract_new_imports_from_py_file(p, root, local_modules=local_modules, base=base)
+            py_deps = extract_new_imports_from_py_file(p, root, local_modules=local_modules, base=base, full_repo=full_repo)
             for d in py_deps:
                 key = f"{d.name}:{d.source_file}:{d.lineno}"
                 if key not in seen_unique:
                     seen_unique.add(key)
                     all_deps.append(d)
         else:
-            manifest_deps = extract_new_manifest_dependencies(p, root, local_modules=local_modules, base=base)
+            manifest_deps = extract_new_manifest_dependencies(p, root, local_modules=local_modules, base=base, full_repo=full_repo)
             for d in manifest_deps:
                 key = f"{d.name}:{d.source_file}:{d.lineno}"
                 if key not in seen_unique:

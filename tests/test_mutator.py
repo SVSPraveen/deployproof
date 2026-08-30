@@ -407,6 +407,128 @@ def test_restore_removes_pyc_cache_file():
         assert pyc2_path.is_file(), "unrelated src2's .pyc must remain intact"
 
 
+def test_error_traces_to_mutant_fixture_crash_vs_unrelated_env_error():
+    """Verify that fixture/setup errors referencing the mutated code are classified as KILLED, while unanchored errors remain RUNNER_ERROR."""
+    from deployproof.mutator import Mutant, _error_traces_to_mutant
+
+    mutant = Mutant(
+        mutant_id="1",
+        file_path=Path("src/requests/structures.py"),
+        line_number=55,
+        description="Replace comparison 'is' with 'is not'",
+        original_line="if data is None:",
+        mutated_line="if data is not None:",
+        mutated_source="...",
+    )
+
+    # Case 1: Fixture error traceback directly referencing structures.py
+    anchored_traceback = """
+_________ ERROR at setup of TestCaseInsensitiveDict.test_list __________
+    @pytest.fixture(autouse=True)
+    def setup(self):
+>       self.case_insensitive_dict = CaseInsensitiveDict()
+tests/test_structures.py:10: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+    def __init__(self, data=None, **kwargs):
+        self._store = OrderedDict()
+        if data is not None:
+            data = {}
+>       self.update(data, **kwargs)
+src/requests/structures.py:57: 
+E   TypeError: 'NoneType' object is not iterable
+"""
+    assert _error_traces_to_mutant(anchored_traceback, mutant) is True
+
+    # Case 2: Synthetic unanchored environment / third-party error
+    unanchored_traceback = """
+==================================== ERRORS ====================================
+________________________ ERROR collecting test_external.py _____________________
+ImportError while importing test module /tmp/tests/test_external.py.
+Traceback:
+/usr/lib/python3.10/importlib/__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name, package, level)
+E   ModuleNotFoundError: No module named 'unrelated_dependency'
+"""
+    assert _error_traces_to_mutant(unanchored_traceback, mutant) is False
+
+
+def test_reporter_score_fraction_formatting_with_and_without_runner_errors():
+    """Verify that reporter displays truthful fraction when runner errors are present vs clean."""
+    from deployproof.mutator import Mutant, MutationResult
+    from deployproof.reporter import format_report
+
+    m1 = Mutant("1", Path("app.py"), 10, "desc", "orig", "mut", "src", status="KILLED")
+    m2 = Mutant("2", Path("app.py"), 20, "desc", "orig", "mut", "src", status="KILLED")
+    m3 = Mutant("3", Path("app.py"), 30, "desc", "orig", "mut", "src", status="KILLED")
+    m4 = Mutant("4", Path("app.py"), 40, "desc", "orig", "mut", "src", status="KILLED")
+    m_err = Mutant("5", Path("app.py"), 50, "desc", "orig", "mut", "src", status="RUNNER_ERROR")
+
+    # Case A: With 1 runner error excluded (4 killed out of 4 valid, 5 total)
+    res_with_err = MutationResult(
+        total_mutants=5,
+        killed_mutants=4,
+        survived_mutants=[],
+        runner_errors=[(m_err, "Pytest exit code 2: SyntaxError")],
+        mutation_score=100.0,
+        duration_seconds=1.23,
+    )
+    report_err = format_report(res_with_err, [Path("app.py")])
+    assert "Score:  100.0% (4/4 valid mutants killed, 1 error excluded)" in report_err
+    assert "Runner Errors (1 error excluded from score):" in report_err
+
+    # Case B: Without runner errors (5 killed out of 5 total)
+    res_clean = MutationResult(
+        total_mutants=5,
+        killed_mutants=5,
+        survived_mutants=[],
+        runner_errors=[],
+        mutation_score=100.0,
+        duration_seconds=1.23,
+    )
+    report_clean = format_report(res_clean, [Path("app.py")])
+    assert "Score:  100.0% (5/5 mutants killed)" in report_clean
+    assert "Runner Errors" not in report_clean
+
+
+def test_parallel_mutation_runner_sandbox_isolation(tmp_path: Path):
+    """Verify that run_mutation_tests in parallel mode executes workers in isolated sandboxes."""
+    from deployproof.mutator import run_mutation_tests
+
+    # 1. Setup repo files
+    src1 = tmp_path / "math_ops.py"
+    src1.write_text("def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n", encoding="utf-8")
+
+    src2 = tmp_path / "str_ops.py"
+    src2.write_text("def is_nonempty(s):\n    return len(s) > 0\n", encoding="utf-8")
+
+    test1 = tmp_path / "test_math_ops.py"
+    test1.write_text("from math_ops import add, sub\ndef test_math():\n    assert add(1, 2) == 3\n    assert sub(5, 2) == 3\n", encoding="utf-8")
+
+    test2 = tmp_path / "test_str_ops.py"
+    test2.write_text("from str_ops import is_nonempty\ndef test_str():\n    assert is_nonempty('a') is True\n    assert is_nonempty('') is False\n", encoding="utf-8")
+
+    # 2. Run parallel mutation testing with 2 workers
+    res = run_mutation_tests(
+        target_files=[src1, src2],
+        repo_root=tmp_path,
+        workers=2,
+        is_full_repo=True,
+        quiet=True,
+    )
+
+    assert res.total_mutants == 4
+    assert res.killed_mutants == 4
+    assert res.mutation_score == 100.0
+    assert len(res.untested_files) == 0
+    assert len(res.runner_errors) == 0
+
+    # Ensure source files are preserved
+    assert "def add(a, b):\n    return a + b" in src1.read_text(encoding="utf-8")
+    assert "def is_nonempty(s):\n    return len(s) > 0" in src2.read_text(encoding="utf-8")
+
+
+
+
 
 
 

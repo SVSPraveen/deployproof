@@ -143,6 +143,8 @@ Pre-check clean: 100% of tested basic mutations caught.
 | `deployproof check --files <paths...>` | Explicitly evaluate specific files (bypasses git diff). |
 | `deployproof check --threshold <float>` | Minimum mutation score percentage required to pass (default: `80.0`). |
 | `deployproof check --base <ref>` | Base git ref (branch/commit/tag) to diff against. |
+| `deployproof check --full-repo` | Audit all tracked files across the entire repository root (respecting `.gitignore`), using isolated parallel workers. |
+| `deployproof check --workers <int>` | Set the number of isolated parallel worker processes for `--full-repo` scans (default: auto-detected CPU count capped at 8). |
 | `deployproof check --wsl` | Delegate mutation testing to `mutmut` inside WSL (Windows only). |
 
 > **Note:** `deployproof check --wsl` (Windows only) is newer and less battle-tested than the core checks — [file an issue](https://github.com/SVSPraveen/DeployProof/issues) if you hit something.

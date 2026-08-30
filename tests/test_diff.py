@@ -102,3 +102,44 @@ def test_test_files_excluded_from_mutation_targets(temp_git_repo):
     files = resolve_changed_python_files(cwd=temp_git_repo)
     assert src_file in files
     assert test_file not in files
+
+
+def test_resolve_full_repo_session_files_respects_gitignore(temp_git_repo):
+    """Verify resolve_full_repo_session_files returns all files while respecting .gitignore."""
+    from deployproof.diff import resolve_full_repo_session_files
+
+    # 1. Create tracked files
+    src1 = temp_git_repo / "main.py"
+    src1.write_text("print(1)\n", encoding="utf-8")
+    readme = temp_git_repo / "README.md"
+    readme.write_text("# Doc\n", encoding="utf-8")
+
+    # 2. Create gitignored file
+    gitignore = temp_git_repo / ".gitignore"
+    gitignore.write_text("ignored_file.py\n*.tmp\n", encoding="utf-8")
+
+    ignored_py = temp_git_repo / "ignored_file.py"
+    ignored_py.write_text("print('secret')\n", encoding="utf-8")
+
+    tmp_file = temp_git_repo / "data.tmp"
+    tmp_file.write_text("temp\n", encoding="utf-8")
+
+    # 3. Create virtualenv file (in IGNORED_DIRS)
+    venv_dir = temp_git_repo / ".venv" / "lib"
+    venv_dir.mkdir(parents=True)
+    venv_py = venv_dir / "lib.py"
+    venv_py.write_text("venv\n", encoding="utf-8")
+
+    subprocess.run(["git", "add", "main.py", "README.md", ".gitignore"], cwd=temp_git_repo, check=True)
+    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=temp_git_repo, check=True)
+
+    # Resolve full repo files
+    files = resolve_full_repo_session_files(cwd=temp_git_repo)
+
+    assert src1 in files
+    assert readme in files
+    assert gitignore in files
+    assert ignored_py not in files
+    assert tmp_file not in files
+    assert venv_py not in files
+

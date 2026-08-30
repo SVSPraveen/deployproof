@@ -195,3 +195,46 @@ def test_main_check_json_output_multi_category_findings(tmp_path: Path, capsys, 
         exit_code_text = main(["check", "--files", str(src), str(test)])
         assert exit_code_text == exit_code
 
+
+def test_main_check_full_repo(tmp_path: Path, capsys, monkeypatch):
+    """Verify --full-repo flag scans all repository files even when working tree is clean."""
+    monkeypatch.chdir(tmp_path)
+    import subprocess
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "test@deployproof.dev"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "DeployProof Test"], cwd=tmp_path, capture_output=True, check=True)
+
+    calc_file = tmp_path / "calc.py"
+    calc_file.write_text(
+        "def add(a: int, b: int) -> int:\n"
+        "    return a + b\n",
+        encoding="utf-8",
+    )
+
+    test_file = tmp_path / "test_calc.py"
+    test_file.write_text(
+        "from calc import add\n\n"
+        "def test_add():\n"
+        "    assert add(1, 2) == 3\n"
+        "    assert add(0, 0) == 0\n",
+        encoding="utf-8",
+    )
+
+    # Commit all files so git working tree is clean
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "commit", "-m", "Initial commit"], cwd=tmp_path, capture_output=True, check=True)
+
+    # 1. Run standard check on clean repo without --full-repo
+    exit_code_diff = main(["check"])
+    assert exit_code_diff == 0
+    captured_diff = capsys.readouterr()
+
+    # 2. Run check with --full-repo
+    exit_code_full = main(["check", "--full-repo"])
+    assert exit_code_full == 0
+    captured_full = capsys.readouterr()
+    assert "Notice: Full repo scan active" in captured_full.out
+    assert "calc.py" in captured_full.out
+    assert "100.0%" in captured_full.out
+
+
