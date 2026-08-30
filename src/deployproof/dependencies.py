@@ -983,7 +983,7 @@ def query_pypi_registry(
     url = f"https://pypi.org/pypi/{canonical_pkg}/json"
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "DeployProof/0.2.0 (https://github.com/SVSPraveen/DeployProof)"},
+        headers={"User-Agent": "DeployProof/0.2.1 (https://github.com/SVSPraveen/DeployProof)"},
     )
 
     try:

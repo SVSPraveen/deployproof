@@ -2,7 +2,7 @@
 
 > Deterministic pre-push verification for AI-assisted codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v0.2.0-007ec6.svg)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/badge/pypi-v0.2.1-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-94%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
@@ -159,7 +159,7 @@ deployproof check --json
 
 ```json
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "status": "passed",
   "summary": {
     "target_files_count": 1,
@@ -259,7 +259,7 @@ Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS cr
 
 ## Status & Roadmap
 
-- **Current (v0.2.0):** Diff-scoped AST mutation testing (with recursive `test/`/`tests/` discovery, AST column-offset snippet reconstruction, and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner (including unquoted .env values and prefix validation), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, 94 unit tests, machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
+- **Current (v0.2.1):** Diff-scoped AST mutation testing (with recursive `test/`/`tests/` discovery, AST column-offset snippet reconstruction, and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner (including unquoted .env values and prefix validation), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, 94 unit tests, machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
 - **Next:** Multi-language mutation support and expanded ecosystem rule packs.
 
 ## Contributing
