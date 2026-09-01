@@ -1047,10 +1047,15 @@ def query_pypi_registry(
     # Map import name to PyPI distribution name if known
     canonical_pkg = normalize_package_name(norm_name)
 
+    try:
+        from deployproof import __version__
+    except ImportError:
+        __version__ = "1.1.0"
+
     url = f"https://pypi.org/pypi/{canonical_pkg}/json"
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "DeployProof/1.0.0 (https://github.com/SVSPraveen/DeployProof)"},
+        headers={"User-Agent": f"DeployProof/{__version__} (https://github.com/SVSPraveen/DeployProof)"},
     )
 
     try:

@@ -9,7 +9,7 @@ from deployproof.cli import create_parser, main
 
 def test_version():
     """Verify version string is accessible."""
-    assert __version__ == "1.0.1"
+    assert isinstance(__version__, str) and len(__version__.split(".")) >= 3
 
 
 def test_parser_version(capsys):

@@ -2,7 +2,7 @@
 
 > Deterministic pre-push verification for AI-assisted codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v1.0.0-007ec6.svg)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/badge/pypi-v1.1.0-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-111%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
@@ -258,7 +258,7 @@ deployproof check --json
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "status": "passed",
   "summary": {
     "target_files_count": 1,
@@ -358,7 +358,7 @@ Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS cr
 
 ## Status & Roadmap
 
-- **Current (v1.0.0):** Diff-scoped AST mutation testing (with recursive discovery and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), **Full Repository Audit Mode (`--full-repo`)** with isolated parallel multi-worker sandboxes and AST import-graph test discovery, baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner, GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, **111 unit tests**, live unbuffered progress streaming, and machine-readable `--json` output.
+- **Current (v1.1.0):** Diff-scoped AST mutation testing (with recursive discovery and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), **Full Repository Audit Mode (`--full-repo`)** with isolated parallel multi-worker sandboxes and AST import-graph test discovery, baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner, GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, **111 unit tests**, live unbuffered progress streaming, and machine-readable `--json` output.
 - **Next:** Reverse test-to-source dependency mapping (see `FUTURE_SCOPE.md`), SARIF 2.1.0 PR annotations, and multi-language mutation rule packs.
 
 ## Contributing
