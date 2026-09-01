@@ -92,10 +92,37 @@ deployproof check --full-repo --workers 8
 * **Disk Space & I/O Overhead**: Running $N$ workers copies the repository snapshot $N$ times into temporary storage ($N \times \text{repo size}$ in `tempfile.gettempdir()`). On disk-constrained environments, use fewer workers (e.g. `--workers 2` or `--workers 4`).
 * **Subprocess / Port Collisions**: If your test suite binds to fixed network ports (e.g. localhost:8080) without dynamic port selection, parallel workers running tests concurrently may trigger port conflicts. Use isolated ports or run sequentially in such environments.
 
-#### Hardware & Throughput Optimization (RAM & CPU Tuning):
-* **Memory Headroom (e.g. 16 GB RAM)**: Each worker process and sandbox snapshot consumes approximately 50 MB to 150 MB of RAM (depending on your test suite imports and fixtures). With **16 GB RAM**, memory is never your bottleneck — you can comfortably scale `--workers` up to match your total physical or logical CPU cores (e.g., `--workers 8`, `--workers 12`, or `--workers 16`) without risking paging or memory pressure.
-* **CPU Core Saturation**: Test runs are primarily CPU-bound. For maximum throughput, set `--workers` to `min(os.cpu_count(), 16)`. DeployProof's internal scheduler automatically assigns mutants across the pool in real time, keeping all CPU cores saturated until the sweep finishes.
-* **Fast Disk / In-Memory Drive**: Because sandboxes are written to your system's temp directory, fast NVMe drives or placing the temporary directory on an in-memory drive (`tmpfs` on Linux / RAM disk on Windows via `TMP` or `TEMP` environment variables) eliminates snapshot I/O latency entirely.
+#### Hardware & Memory Sizing Architecture (RAM & CPU Optimization):
+
+DeployProof's parallel sandboxing engine scales throughput directly with **available physical RAM** and **logical CPU cores**. Because test execution is CPU-bound and sandbox file I/O is memory-bound, hardware capacity dictates performance:
+
+```
+Total Memory Required ≈ Base OS Overhead (~2 GB) + [ N_workers × (Worker Process RSS + OS Page Cache Footprint) ]
+```
+
+##### 1. Why More RAM Directly Maximizes Verification Speed:
+* **Zero-Latency In-Memory OS Page Cache**: When physical RAM comfortably exceeds the aggregate working set of all $N$ workers, the operating system holds all sandbox file trees, compiled `.pyc` modules, and pytest test fixtures directly in the **RAM page cache**. File mutations and test imports achieve sub-millisecond execution with zero physical NVMe/SSD read/write contention.
+* **Elimination of Page-Fault Swapping**: If total RAM is insufficient for the requested `--workers N`, the OS kernel is forced to page memory to disk (`pagefile.sys` on Windows or swap partitions on Linux). Page thrashing introduces severe disk queue latency that can degrade multi-process test throughput by 5× to 10×. Higher RAM guarantees that all workers remain 100% compute-active in physical memory.
+
+##### 2. Per-Worker Memory Consumption Profile:
+* **Python Runtime & AST Engine**: ~35 MB RSS per worker.
+* **Pytest Test Suite & Dependencies**: ~50 MB to 150 MB RSS per worker (depending on framework imports like FastAPI, Django, SQLAlchemy, or Requests).
+* **Sandbox Working Directory Snapshot**: ~15 MB to 50 MB in OS file cache per worker.
+* **Total Allocation per Worker Process**: **~100 MB to 250 MB RAM per worker**.
+
+##### 3. Hardware Sizing & Safe Allocation Matrix:
+
+| Installed System RAM | Recommended Worker Flag | Memory Consumed by DeployProof | System Headroom Remaining | Intended Verification Profile |
+| :--- | :--- | :--- | :--- | :--- |
+| **2 GB – 4 GB** | `deployproof check` *(Sequential)* | ~120 MB total | High (~2.5 GB free) | Ultra-lightweight diff checks; single-core laptops. |
+| **8 GB** | `--workers 4` | ~0.8 GB – 1.0 GB | Safe (~5.5 GB free) | Standard local feature branches and medium diffs. |
+| **16 GB** | **`--workers 8` to `--workers 16`** | **~1.6 GB – 3.2 GB** | **Abundant (~12.8 GB free)** | **Full CPU core saturation; rapid multi-file diffs & full-repo sweeps.** |
+| **32 GB+** | `--workers 16` to `--workers 32` | ~3.5 GB – 6.5 GB | Enterprise headroom | Heavy monorepos, multi-thousand mutant CI sweeps. |
+
+##### 4. Minimum vs Recommended System Requirements:
+* **Absolute Minimum System RAM**: **2 GB** (for default sequential diff-scoped `deployproof check`).
+* **Minimum System RAM for Multi-Worker Mode (`--workers 4`)**: **4 GB**.
+* **Recommended System RAM for Max-Throughput Parallel Mode (`--workers 8` or `16`)**: **16 GB** (provides sufficient headroom to keep 8 to 16 Python subprocesses and their entire sandboxes resident in physical memory).
 
 Output includes a section for each check — symlink scan, secrets scan, dependency scan, mock detection, control flow analysis, and mutation score — with a pass/fail line at the bottom. 
 

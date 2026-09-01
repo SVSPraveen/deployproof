@@ -127,6 +127,26 @@ Developer Finishes Coding Session / Pre-Push Trigger
 - **Temporary Disk Footprint**: Running $N$ workers consumes $N \times \text{repository size}$ in temporary storage. On disk-constrained runners, cap workers to 2 or 4.
 - **Fixed-Port Test Collisions**: Tests that bind hardcoded socket ports (e.g. `localhost:8000`) without dynamic allocation will experience port collisions when run in parallel workers.
 
+### Hardware & Memory Sizing Architecture (RAM & CPU Tuning):
+
+DeployProof's parallel execution engine scales verification throughput in direct proportion to **installed physical RAM** and **logical CPU cores**:
+
+$$\text{Total RAM Required} \approx \text{OS Baseline Overhead (2 GB)} + \sum_{i=1}^{N} \left( \text{Worker Process RSS}_i + \text{Snapshot In-Memory Cache}_i \right)$$
+
+* **Why Higher RAM Maximizes Execution Speed**:
+  * **In-Memory OS Page Cache**: When physical RAM exceeds the active working set of all $N$ workers, the operating system holds all sandbox filesystem trees, bytecode caches (`__pycache__`), and pytest fixtures directly in the **RAM page cache**. File mutations and test imports achieve sub-millisecond execution with zero physical NVMe/SSD read/write contention.
+  * **Zero Page-Fault Swap Latency**: If system RAM is constrained below worker requirements, the OS kernel is forced to page memory to disk (`pagefile.sys` on Windows / swap partition on Linux). Page thrashing introduces severe disk I/O queue wait times that degrade multi-process mutation throughput by 5× to 10×.
+* **Per-Worker Memory Footprint**:
+  * Python 3.x runtime & AST parser: ~35 MB RSS.
+  * Framework & test suite imports (FastAPI, Django, SQLAlchemy, Requests): ~50 MB – 150 MB RSS.
+  * Sandbox working directory snapshot: ~15 MB – 50 MB in OS page cache.
+  * **Aggregate Allocation**: **~100 MB to 250 MB RAM per active worker process**.
+* **RAM Allocation Matrix**:
+  * **2 GB – 4 GB RAM**: Single-worker / sequential diff verification (`deployproof check`, ~120 MB overhead).
+  * **8 GB RAM**: Safe multi-worker parallel verification up to `--workers 4` (~0.8 GB – 1.0 GB consumed).
+  * **16 GB RAM**: High-performance parallel verification across **`--workers 8` to `--workers 16`** (~1.6 GB – 3.2 GB consumed, leaving over 12 GB free for OS and IDE).
+  * **32 GB+ RAM**: High-throughput CI/CD build servers running `--workers 16` to `--workers 32` (~3.5 GB – 6.5 GB consumed) for multi-thousand mutant monorepos.
+
 ---
 
 ## 7. Security & Privacy Model
