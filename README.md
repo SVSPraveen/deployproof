@@ -1,7 +1,7 @@
 # DeployProof
 
 <p align="center">
-  <img src="assets/deployproof-hero.jpg" alt="DeployProof Hero Banner" width="100%" />
+  <img src="assets/deployproof-hero.png" alt="DeployProof Hero Banner" width="100%" />
 </p>
 
 > Deterministic pre-push quality & security gate for modern Python codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense. Built for human engineering teams and AI-assisted workflows alike.
