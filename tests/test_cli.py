@@ -9,7 +9,7 @@ from deployproof.cli import create_parser, main
 
 def test_version():
     """Verify version string is accessible."""
-    assert __version__ == "1.0.0"
+    assert __version__ == "1.0.1"
 
 
 def test_parser_version(capsys):
@@ -19,7 +19,7 @@ def test_parser_version(capsys):
         parser.parse_args(["--version"])
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    assert "deployproof 1.0.0" in captured.out or "deployproof 1.0.0" in captured.err
+    assert f"deployproof {__version__}" in captured.out or f"deployproof {__version__}" in captured.err
 
 
 def test_parser_help(capsys):
@@ -105,7 +105,7 @@ def test_main_check_json_output_passing(capsys):
 
         data = json.loads(captured.out)
         assert data["status"] == "passed"
-        assert data["version"] == "1.0.0"
+        assert data["version"] == __version__
         assert data["summary"]["mutation_score"] == 100.0
         assert data["summary"]["secrets_found"] == 0
         assert data["summary"]["symlink_escapes_found"] == 0
