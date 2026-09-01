@@ -1,5 +1,9 @@
 # DeployProof
 
+<p align="center">
+  <img src="assets/deployproof-hero.jpg" alt="DeployProof Hero Banner" width="100%" />
+</p>
+
 > Deterministic pre-push verification for AI-assisted codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense.
 
 [![PyPI version](https://img.shields.io/badge/pypi-v1.1.0-007ec6.svg)](https://pypi.org/project/deployproof/)
