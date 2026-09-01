@@ -2,8 +2,8 @@
 
 Core rule: nothing in Stage N+1 starts until Stage N has real evidence behind it. No stage is time-boxed - it ends when its exit criteria are actually met, however long that takes.
 
-## Stage 0 — Current State (as of v1.1.1 launch)
-v1.1.1, Python-first, deterministic verification (diff-scoped mutation testing, secrets scanning, PyPI slopsquatting detection, control-flow checks, symlink sandbox-escape detection, and multi-worker full-repo audits). Verified against major open-source codebases (`click`, `requests`, `colorama`). Zero external users. Zero external contributors. Zero public posts.
+## Stage 0 — Current State (as of v1.1.11 launch)
+v1.1.11, Python-first, deterministic verification (diff-scoped mutation testing, secrets scanning, PyPI slopsquatting detection, control-flow checks, symlink sandbox-escape detection, and multi-worker full-repo audits). Verified against major open-source codebases (`click`, `requests`, `colorama`). Zero external users. Zero external contributors. Zero public posts.
 
 ## Stage 1 — Launch Week
 Actions: publish the proof artifact (terminal recording showing a real bug DeployProof catches that pytest misses), post to Hacker News and r/Python using the durable "deterministic verification" positioning, not an AI-hype-only framing.

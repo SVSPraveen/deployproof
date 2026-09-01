@@ -5,9 +5,10 @@ All notable changes to DeployProof will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.1] - 2026-09-01
+## [1.1.11] - 2026-09-01
 
 ### Changed
+- **PyPI Clean Rendering**: Removed relative image tag from `README.md` to prevent broken image box on PyPI release page.
 - **Universal Codebase Positioning**: Elevated package positioning and metadata to support modern Python codebases generally (built for human engineering teams and AI-assisted workflows alike).
 - **Expanded PyPI Metadata**: Added `code-quality`, `developer-tools`, and `python-testing` keywords to `pyproject.toml`.
 - **Recommended Installation**: Promoted `pipx install deployproof` as the primary installation method for isolated global CLI access.
