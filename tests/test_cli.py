@@ -137,9 +137,10 @@ def test_main_check_json_output_multi_category_findings(tmp_path: Path, capsys, 
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=root, check=True)
 
     src = root / "service.py"
+    fake_key = "sk-" + "proj-abc123xyz123abc123xyz123abc123xyz123abc123xyz123"
     src.write_text(
         "import importlib\n\n"
-        "OPENAI_API_KEY = 'sk-proj-abc123xyz123abc123xyz123abc123xyz123abc123xyz123'\n\n"
+        f"OPENAI_API_KEY = '{fake_key}'\n\n"
         "def load_plugin():\n"
         "    return importlib.import_module('hallucinated_fake_package_xyz')\n\n"
         "def calculate(x: int) -> int:\n"
