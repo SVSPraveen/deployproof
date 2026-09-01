@@ -365,5 +365,44 @@ def test_openssl_import_mapping(tmp_path: Path):
     assert names["bs4"] == "beautifulsoup4"
     assert names["dateutil"] == "python-dateutil"
 
+def test_legacy_python2_stdlib_compat_shims(tmp_path: Path):
+    """Verify legacy Python 2 stdlib modules used in compatibility shims are recognized as stdlib and not flagged as external dependencies."""
+    root = tmp_path / "mock_repo"
+    root.mkdir()
 
+    compat_py = root / "compat.py"
+    compat_py.write_text(
+        """
+try:
+    import StringIO
+except ImportError:
+    import io as StringIO
 
+try:
+    from cStringIO import StringIO as cStringIO
+except ImportError:
+    cStringIO = None
+
+try:
+    from BaseHTTPServer import HTTPServer
+    from SimpleHTTPServer import SimpleHTTPRequestHandler
+except ImportError:
+    from http.server import HTTPServer, SimpleHTTPRequestHandler
+
+import urllib2
+import urlparse
+import httplib
+import Cookie
+import cookielib
+import Queue
+import SocketServer
+import ConfigParser
+import xmlrpclib
+import commands
+""",
+        encoding="utf-8",
+    )
+
+    local_modules = get_local_module_names(root)
+    extracted = extract_new_imports_from_py_file(compat_py, root=root, local_modules=local_modules)
+    assert len(extracted) == 0

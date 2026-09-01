@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deployproof"
-version = "0.2.2"
+version = "1.0.0"
 description = "A deterministic AI-code deployability checker that catches what coverage misses."
 readme = "README.md"
 requires-python = ">=3.10"

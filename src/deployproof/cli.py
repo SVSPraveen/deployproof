@@ -6,9 +6,9 @@ from typing import List, Optional
 from deployproof import __version__
 from deployproof.dependencies import extract_all_new_dependencies, scan_dependencies
 from deployproof.control_flow import scan_session_files_for_control_flow
-from deployproof.diff import DiffScopeError, InvalidBaseRefError, NotAGitRepositoryError, get_git_root, is_test_file, resolve_changed_python_files, resolve_changed_session_files, resolve_full_repo_session_files
+from deployproof.diff import DiffScopeError, InvalidBaseRefError, NotAGitRepositoryError, get_git_root, is_excluded_mutation_target, is_test_file, resolve_changed_python_files, resolve_changed_session_files, resolve_full_repo_session_files
 from deployproof.mocks import scan_session_files_for_mocks
-from deployproof.mutator import run_mutation_tests
+from deployproof.mutator import cleanup_stale_deployproof_temp_dirs, run_mutation_tests
 from deployproof.reporter import LARGE_FILE_LOC_THRESHOLD, format_json_report, format_report
 from deployproof.secrets import scan_session_files_for_secrets
 from deployproof.symlinks import scan_session_files_for_symlinks
@@ -36,6 +36,7 @@ def create_parser() -> argparse.ArgumentParser:
 
 def handle_check(args: argparse.Namespace) -> int:
     """Handle the 'check' subcommand."""
+    cleanup_stale_deployproof_temp_dirs()
     cwd = Path.cwd().resolve()
     repo_root: Optional[Path] = None
     is_full_repo = getattr(args, 'full_repo', False)
@@ -85,10 +86,10 @@ def handle_check(args: argparse.Namespace) -> int:
     mock_result = scan_session_files_for_mocks(session_files=session_files, root=repo_root or cwd, base=args.base, full_repo=is_full_repo)
     control_flow_result = scan_session_files_for_control_flow(session_files=session_files, root=repo_root or cwd, base=args.base, full_repo=is_full_repo)
     if args.files:
-        non_test_files = [f for f in session_files if f.is_file() and f.suffix == '.py' and (not is_test_file(f))]
-        target_files = non_test_files if non_test_files else [f for f in session_files if f.is_file() and f.suffix == '.py']
+        non_excluded_files = [f for f in session_files if f.is_file() and f.suffix == '.py' and (not is_excluded_mutation_target(f, repo_root or cwd))]
+        target_files = non_excluded_files if non_excluded_files else [f for f in session_files if f.is_file() and f.suffix == '.py']
     else:
-        target_files = [f for f in session_files if f.is_file() and f.suffix == '.py' and (not is_test_file(f))]
+        target_files = [f for f in session_files if f.is_file() and f.suffix == '.py' and (not is_excluded_mutation_target(f, repo_root or cwd))]
     if not getattr(args, 'json', False):
         for f in target_files:
             try:
@@ -118,15 +119,7 @@ def handle_check(args: argparse.Namespace) -> int:
         elif not getattr(args, 'json', False):
             print(wsl_msg)
             print('-' * 68)
-    result = run_mutation_tests(
-        target_files=target_files,
-        repo_root=repo_root or cwd,
-        test_runner_timeout=args.timeout,
-        extra_pytest_args=args.tests,
-        workers=getattr(args, 'workers', None),
-        is_full_repo=is_full_repo,
-        quiet=getattr(args, 'json', False),
-    )
+    result = run_mutation_tests(target_files=target_files, repo_root=repo_root or cwd, test_runner_timeout=args.timeout, extra_pytest_args=args.tests, workers=getattr(args, 'workers', None), is_full_repo=is_full_repo, base=args.base, quiet=getattr(args, 'json', False))
     if getattr(args, 'json', False):
         report_text = format_json_report(result=result, target_files=target_files, secrets_result=secrets_result, symlink_result=symlink_result, dependency_result=dependency_result, mock_result=mock_result, control_flow_result=control_flow_result, strict_mocks=getattr(args, 'strict_mocks', False), strict_error_handling=getattr(args, 'strict_error_handling', False), repo_root=repo_root or cwd, threshold=args.threshold, version=__version__)
     else:
@@ -176,12 +169,12 @@ def main(argv: Optional[List[str]]=None) -> int:
     """Entry point for the DeployProof CLI."""
     if hasattr(sys.stdout, 'reconfigure'):
         try:
-            sys.stdout.reconfigure(errors='replace')
+            sys.stdout.reconfigure(line_buffering=True, errors='replace')
         except Exception:
             pass
     if hasattr(sys.stderr, 'reconfigure'):
         try:
-            sys.stderr.reconfigure(errors='replace')
+            sys.stderr.reconfigure(line_buffering=False, errors='replace')
         except Exception:
             pass
     parser = create_parser()

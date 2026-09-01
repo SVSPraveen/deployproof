@@ -143,3 +143,25 @@ def test_resolve_full_repo_session_files_respects_gitignore(temp_git_repo):
     assert tmp_file not in files
     assert venv_py not in files
 
+
+def test_is_excluded_mutation_target(tmp_path: Path):
+    """Verify is_excluded_mutation_target filters docs, setup.py, conf.py, conftest.py, and untargeted configs."""
+    from deployproof.diff import is_excluded_mutation_target
+
+    # Excluded files
+    assert is_excluded_mutation_target(tmp_path / "docs" / "conf.py") is True
+    assert is_excluded_mutation_target(tmp_path / "docs" / "helper.py") is True
+    assert is_excluded_mutation_target(tmp_path / ".github" / "actions" / "people" / "people.py") is True
+    assert is_excluded_mutation_target(tmp_path / ".github" / "workflows" / "scripts" / "check.py") is True
+    assert is_excluded_mutation_target(tmp_path / "conf.py") is True
+    assert is_excluded_mutation_target(tmp_path / "setup.py") is True
+    assert is_excluded_mutation_target(tmp_path / "conftest.py") is True
+    assert is_excluded_mutation_target(tmp_path / "tests" / "conftest.py") is True
+    assert is_excluded_mutation_target(tmp_path / "docs_config.py", root=tmp_path) is True
+
+    # Legitimate application files (must NOT be excluded)
+    assert is_excluded_mutation_target(tmp_path / "app.py") is False
+    assert is_excluded_mutation_target(tmp_path / "src" / "service.py") is False
+    assert is_excluded_mutation_target(tmp_path / "src" / "requests" / "structures.py") is False
+
+

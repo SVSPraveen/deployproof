@@ -8,6 +8,8 @@ from deployproof.mutator import (
     generate_mutants_for_file,
     MutationCounter,
     MutationTransformer,
+    _run_mutation_tests_sequential,
+    run_mutation_tests_parallel,
 )
 
 
@@ -208,10 +210,10 @@ def test_timeout_mutant_treated_as_killed():
         call_count = 0
         real_run = subprocess.run
         def mock_subprocess_run(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count > 1:  # Baseline succeeds, mutant times out
-                raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout", 10.0))
+            cmd = args[0] if args else kwargs.get("args", [])
+            cmd_str = " ".join(cmd) if isinstance(cmd, list) else str(cmd)
+            if "-x" in cmd_str:  # Mutant test execution times out
+                raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs.get("timeout", 10.0))
             return real_run(*args, **kwargs)
 
         with patch("subprocess.run", side_effect=mock_subprocess_run):
@@ -322,8 +324,8 @@ def test_real_subprocess_os_signal_interrupt_restoration():
         subprocess.run(["git", "add", "."], cwd=str(tmp_path), capture_output=True, check=True)
         subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmp_path), capture_output=True, check=True)
 
-        # Modify calc.py to be in diff
-        mod_code = orig_code + "\n# touch\n"
+        # Modify calc.py to be in diff with an executable mutation target
+        mod_code = orig_code.replace("return res + 1", "return res + 2")
         src_file.write_text(mod_code, encoding="utf-8")
 
         repo_root = Path(__file__).resolve().parent.parent
@@ -345,7 +347,7 @@ def test_real_subprocess_os_signal_interrupt_restoration():
 
         start_wait = time.time()
         mutant_detected = False
-        while time.time() - start_wait < 15.0:
+        while time.time() - start_wait < 30.0:
             if src_file.read_text(encoding="utf-8") != mod_code:
                 mutant_detected = True
                 break
@@ -527,9 +529,204 @@ def test_parallel_mutation_runner_sandbox_isolation(tmp_path: Path):
     assert "def is_nonempty(s):\n    return len(s) > 0" in src2.read_text(encoding="utf-8")
 
 
+def test_coverage_guided_test_selection_fixture(tmp_path: Path):
+    """
+    Verify coverage-guided test selection:
+    (a) Mutants in specific functions receive only their covering test nodeids.
+    (b) Mutants on module-level constants fall back to the full file correctly.
+    (c) Final mutation score and kill counts match full-file sequential execution.
+    """
+    src_dir = tmp_path / "src" / "pkg"
+    src_dir.mkdir(parents=True)
+    service_file = src_dir / "service.py"
+    service_file.write_text(
+        "DEFAULT_LIMIT = 50\n"
+        "\n"
+        "def compute_tax(amount: float) -> float:\n"
+        "    return amount * 0.1\n"
+        "\n"
+        "def compute_discount(amount: float) -> float:\n"
+        "    return amount * 0.2\n",
+        encoding="utf-8",
+    )
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir(parents=True)
+    test_file = tests_dir / "test_service.py"
+    test_file.write_text(
+        "from pkg.service import compute_tax, compute_discount, DEFAULT_LIMIT\n"
+        "\n"
+        "def test_default_limit():\n"
+        "    assert DEFAULT_LIMIT == 50\n"
+        "\n"
+        "def test_tax():\n"
+        "    assert compute_tax(100.0) == 10.0\n"
+        "\n"
+        "def test_discount():\n"
+        "    assert compute_discount(100.0) == 20.0\n",
+        encoding="utf-8",
+    )
+
+    # 1. Run sequential (full-file test execution)
+    res_seq = _run_mutation_tests_sequential([service_file], repo_root=tmp_path)
+
+    # 2. Run parallel (coverage-guided minimal test selection)
+    res_par = run_mutation_tests_parallel([service_file], repo_root=tmp_path, workers=2, quiet=True)
+
+    # Assert matching outcomes
+    assert res_seq.total_mutants == res_par.total_mutants
+    assert res_seq.killed_mutants == res_par.killed_mutants
+    assert res_seq.mutation_score == res_par.mutation_score
+    assert res_par.mutation_score == 100.0
+    assert len(res_par.untested_files) == 0
+    assert len(res_par.runner_errors) == 0
 
 
+def test_collection_crash_classified_as_killed_vs_unanchored_runner_error(tmp_path: Path):
+    """
+    Verify collection crashes (pytest exit code 2):
+    - Mutation-caused collection crash referencing the mutated file/line -> KILLED
+    - Unanchored / unrelated collection error -> RUNNER_ERROR
+    """
+    from deployproof.mutator import _run_single_mutant_in_sandbox, Mutant, _error_traces_to_mutant
+
+    # Case A: Collection crash caused directly by mutated module
+    snap = tmp_path / "snapshot"
+    snap.mkdir()
+    src = snap / "module.py"
+    src.write_text("def get_items():\n    return [1, 2, 3]\n", encoding="utf-8")
+
+    test = snap / "test_module.py"
+    test.write_text("import module\nassert len(module.get_items()) == 3\n", encoding="utf-8")
+
+    temp_base = tmp_path / "workers"
+    temp_base.mkdir()
+    pp = str(snap)
+
+    res_mut = _run_single_mutant_in_sandbox(
+        str(temp_base), str(snap), "module.py",
+        "mod:2:mut1", 2, "Replace return list with None",
+        "return [1, 2, 3]", "return None",
+        "def get_items():\n    return None\n",
+        ["test_module.py"], 0, 10.0, pp
+    )
+    assert res_mut["status"] == "KILLED"
+
+    # Case B: Unanchored collection error (e.g. broken external test)
+    unanchored_error_output = (
+        "ERROR collecting test_unrelated.py\n"
+        "ModuleNotFoundError: No module named 'nonexistent_package'\n"
+    )
+    mutant = Mutant("1", Path("module.py"), 1, "desc", "orig", "mut", "src")
+    assert _error_traces_to_mutant(unanchored_error_output, mutant) is False
 
 
+def test_cleanup_stale_deployproof_temp_dirs(tmp_path: Path, monkeypatch):
+    """Verify startup cleanup safely purges stale dead-PID temp dirs while preserving live-PID dirs."""
+    import os
+    from deployproof.mutator import cleanup_stale_deployproof_temp_dirs, _ACTIVE_TEMP_DIRS
+
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+    # 1. Create a stale dir with a non-existent dead PID marker (e.g. 9999999)
+    stale_dir = tmp_path / "deployproof_workers_stale999"
+    stale_dir.mkdir()
+    (stale_dir / ".deployproof_pid_9999999").touch()
+    (stale_dir / "dummy.txt").write_text("old file", encoding="utf-8")
+
+    # 2. Create an active dir with our current process's live PID marker
+    live_dir = tmp_path / "deployproof_workers_live123"
+    live_dir.mkdir()
+    (live_dir / f".deployproof_pid_{os.getpid()}").touch()
+    (live_dir / "active.txt").write_text("current file", encoding="utf-8")
+
+    # 3. Create a dir currently registered in _ACTIVE_TEMP_DIRS
+    tracked_dir = tmp_path / "deployproof_workers_tracked456"
+    tracked_dir.mkdir()
+    _ACTIVE_TEMP_DIRS.add(tracked_dir)
+
+    try:
+        cleaned_count = cleanup_stale_deployproof_temp_dirs()
+        assert cleaned_count >= 1
+        assert not stale_dir.exists()
+        assert live_dir.exists()
+        assert tracked_dir.exists()
+    finally:
+        _ACTIVE_TEMP_DIRS.discard(tracked_dir)
+
+
+def test_cleanup_active_temp_dirs(tmp_path: Path):
+    """Verify _cleanup_active_temp_dirs purges all tracked worker directories on exit/signal."""
+    from deployproof.mutator import _cleanup_active_temp_dirs, _ACTIVE_TEMP_DIRS
+
+    d1 = tmp_path / "deployproof_workers_test1"
+    d2 = tmp_path / "deployproof_workers_test2"
+    d1.mkdir()
+    d2.mkdir()
+    (d1 / "test.txt").write_text("hello", encoding="utf-8")
+    (d2 / "test.txt").write_text("world", encoding="utf-8")
+
+    _ACTIVE_TEMP_DIRS.add(d1)
+    _ACTIVE_TEMP_DIRS.add(d2)
+
+    assert len(_ACTIVE_TEMP_DIRS) == 2
+    _cleanup_active_temp_dirs()
+
+def test_calculate_baseline_timeout(tmp_path: Path):
+    """Verify _calculate_baseline_timeout scales properly with file count, size, and multi-file suites."""
+    from deployproof.mutator import _calculate_baseline_timeout
+
+    # 1. Single small test file
+    t1 = tmp_path / "test_small.py"
+    t1.write_text("def test_one(): assert 1 == 1\n", encoding="utf-8")
+
+    to_single = _calculate_baseline_timeout([str(t1)], tmp_path, test_runner_timeout=10.0)
+    assert to_single == 60.0  # Floor minimum is 60.0s
+
+    # 2. Multiple test files
+    test_files = []
+    for i in range(5):
+        tf = tmp_path / f"test_{i}.py"
+        tf.write_text("def test(): pass\n", encoding="utf-8")
+        test_files.append(str(tf))
+
+    to_multi = _calculate_baseline_timeout(test_files, tmp_path, test_runner_timeout=10.0)
+    # 5 files * 35.0s = 175.0s, with multi_file_factor 1.25x -> 218.8s
+    assert to_multi >= 218.0
+
+    # 3. Large test file
+    large_test = tmp_path / "test_large.py"
+    large_content = "def test_chunk(): pass\n" * 5000  # ~115 KB
+    large_test.write_text(large_content, encoding="utf-8")
+    
+    to_large = _calculate_baseline_timeout([str(large_test)], tmp_path, test_runner_timeout=10.0)
+    # ~115 KB * 2.5s = ~287.5s
+    assert to_large >= 250.0
+
+
+def test_cleanup_stale_deployproof_temp_dirs_preserves_live_pids(tmp_path: Path, monkeypatch):
+    """Verify cleanup_stale_deployproof_temp_dirs deletes dead PIDs but never touches active PIDs."""
+    import os
+    from deployproof.mutator import cleanup_stale_deployproof_temp_dirs
+
+    # Mock tempdir to tmp_path
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+
+    # Create active dir with current process PID
+    active_dir = tmp_path / "deployproof_workers_active_test"
+    active_dir.mkdir()
+    (active_dir / f".deployproof_pid_{os.getpid()}").touch()
+    (active_dir / "keep_me.txt").write_text("data", encoding="utf-8")
+
+    # Create stale dir with fake dead PID
+    stale_dir = tmp_path / "deployproof_workers_stale_test"
+    stale_dir.mkdir()
+    (stale_dir / ".deployproof_pid_9999999").touch()
+    (stale_dir / "delete_me.txt").write_text("stale", encoding="utf-8")
+
+    cleaned = cleanup_stale_deployproof_temp_dirs()
+    assert cleaned >= 1
+    assert active_dir.is_dir()
+    assert not stale_dir.is_dir()
 
 

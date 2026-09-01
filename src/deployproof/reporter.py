@@ -10,7 +10,7 @@ from deployproof.secrets import SecretsScanResult
 from deployproof.symlinks import SymlinkScanResult
 LARGE_FILE_LOC_THRESHOLD = 300
 
-def format_json_report(result: MutationResult, target_files: List[Path], secrets_result: Optional[SecretsScanResult]=None, symlink_result: Optional[SymlinkScanResult]=None, dependency_result: Optional[DependencyScanSummary]=None, mock_result: Optional[MockScanSummary]=None, control_flow_result: Optional[ControlFlowScanSummary]=None, strict_mocks: bool=False, strict_error_handling: bool=False, repo_root: Optional[Path]=None, threshold: float=80.0, version: str='0.2.2') -> str:
+def format_json_report(result: MutationResult, target_files: List[Path], secrets_result: Optional[SecretsScanResult]=None, symlink_result: Optional[SymlinkScanResult]=None, dependency_result: Optional[DependencyScanSummary]=None, mock_result: Optional[MockScanSummary]=None, control_flow_result: Optional[ControlFlowScanSummary]=None, strict_mocks: bool=False, strict_error_handling: bool=False, repo_root: Optional[Path]=None, threshold: float=80.0, version: str='1.0.0') -> str:
     """Format all scan findings and mutation results as a structured JSON string."""
     root = (repo_root or Path.cwd()).resolve()
     strict_mocks_triggered = bool(strict_mocks and mock_result and (mock_result.total_findings > 0))

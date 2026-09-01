@@ -52,8 +52,10 @@ def test_wsl_readiness_when_configured():
         assert "configured" in msg
 
 
-def test_cli_wsl_fallback_execution(capsys, tmp_path):
+def test_cli_wsl_fallback_execution(capsys, tmp_path, monkeypatch):
     """Verify CLI --wsl flag degrades gracefully to Tier 1 when venv is unconfigured."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(tmp_path))
     src = tmp_path / "sample.py"
     src.write_text("def sub(a, b): return a - b\n", encoding="utf-8")
     test = tmp_path / "test_sample.py"

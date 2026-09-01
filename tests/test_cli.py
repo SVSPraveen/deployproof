@@ -9,7 +9,7 @@ from deployproof.cli import create_parser, main
 
 def test_version():
     """Verify version string is accessible."""
-    assert __version__ == "0.2.2"
+    assert __version__ == "1.0.0"
 
 
 def test_parser_version(capsys):
@@ -19,7 +19,7 @@ def test_parser_version(capsys):
         parser.parse_args(["--version"])
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
-    assert "deployproof 0.2.2" in captured.out or "deployproof 0.2.2" in captured.err
+    assert "deployproof 1.0.0" in captured.out or "deployproof 1.0.0" in captured.err
 
 
 def test_parser_help(capsys):
@@ -105,7 +105,7 @@ def test_main_check_json_output_passing(capsys):
 
         data = json.loads(captured.out)
         assert data["status"] == "passed"
-        assert data["version"] == "0.2.2"
+        assert data["version"] == "1.0.0"
         assert data["summary"]["mutation_score"] == 100.0
         assert data["summary"]["secrets_found"] == 0
         assert data["summary"]["symlink_escapes_found"] == 0
@@ -236,5 +236,27 @@ def test_main_check_full_repo(tmp_path: Path, capsys, monkeypatch):
     assert "Notice: Full repo scan active" in captured_full.out
     assert "calc.py" in captured_full.out
     assert "100.0%" in captured_full.out
+    assert "mutants" in captured_full.out
+    assert "elapsed:" in captured_full.out
+
+
+def test_live_progress_output_in_diff_scoped(tmp_path: Path, capsys, monkeypatch):
+    """Verify live periodic progress lines are emitted in diff-scoped runs."""
+    monkeypatch.chdir(tmp_path)
+    import subprocess
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "test@deployproof.dev"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "DeployProof Test"], cwd=tmp_path, capture_output=True, check=True)
+
+    src = tmp_path / "math_utils.py"
+    src.write_text("def compute(x: int) -> int:\n    if x > 10:\n        return x * 2\n    return x + 1\n", encoding="utf-8")
+    test = tmp_path / "test_math_utils.py"
+    test.write_text("from math_utils import compute\ndef test_compute():\n    assert compute(15) == 30\n    assert compute(5) == 6\n", encoding="utf-8")
+
+    exit_code = main(["check", "--files", str(src)])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "mutants" in captured.out
+    assert "elapsed:" in captured.out
 
 

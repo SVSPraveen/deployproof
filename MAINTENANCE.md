@@ -1,9 +1,9 @@
 # Maintenance & Support
 
-DeployProof is an open-source tool focused strictly on deterministic local pre-push verification for Python (diff-scoped mutation testing, secrets scanning, dependency verification, symlink escape checks, and control-flow anomaly detection).
+DeployProof is an open-source tool focused strictly on deterministic pre-push verification for Python (diff-scoped mutation testing, secrets scanning, dependency verification, symlink escape checks, control-flow anomaly detection, and optional multi-worker full-repo audits).
 
-## Scope Limits
-Features and checks that belong in general linters, heavy SaaS platforms, or full-repo CI suites are intentionally out of scope. DeployProof prioritizes fast, reproducible, and zero-configuration local developer workflows over sprawling feature surfaces.
+## Scope Limits & Execution Philosophy
+DeployProof prioritizes fast, reproducible, and zero-configuration local developer workflows. The primary daily workflow (`deployproof check`) is scoped strictly to active session diffs for 2–5 second execution speed. Full repository audits (`--full-repo`) scale honestly with codebase size and test suite runtime (from minutes on small libraries to an hour+ on heavy repositories with live network tests).
 
 ## Issue Triage Cadence
 Issues and pull requests are triaged on a best-effort, periodic cadence (typically weekly). Critical security disclosures and reproducible bug reports against supported environments are prioritized first.

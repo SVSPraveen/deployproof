@@ -52,10 +52,118 @@ class MutationResult:
     collection_error: Optional[str] = None
 _CURRENT_MUTATED_FILE: Optional[Path] = None
 _CURRENT_ORIGINAL_CONTENT: Optional[str] = None
+_ACTIVE_TEMP_DIRS: Set[Path] = set()
 _SIGNAL_HANDLER_INSTALLED: bool = False
 _PREV_SIGINT: Any = None
 _PREV_SIGTERM: Any = None
 _PREV_SIGBREAK: Any = None
+
+def _on_rm_error(func: Any, path: str, exc_info: Any) -> None:
+    """Clear Windows read-only attributes and retry file/directory removal."""
+    try:
+        import stat
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception:
+        pass
+
+def _cleanup_active_temp_dirs() -> None:
+    """Immediately remove all active temporary worker directories tracked by this process."""
+    global _ACTIVE_TEMP_DIRS
+    for temp_path in list(_ACTIVE_TEMP_DIRS):
+        if temp_path.is_dir():
+            try:
+                shutil.rmtree(temp_path, onerror=_on_rm_error)
+            except Exception:
+                pass
+    _ACTIVE_TEMP_DIRS.clear()
+
+atexit.register(_cleanup_active_temp_dirs)
+
+def cleanup_stale_deployproof_temp_dirs() -> int:
+    """
+    Scans the system temp directory for orphaned deployproof temp directories from
+    previous interrupted or crashed runs (e.g. SIGKILL, forced termination, closed terminals).
+    
+    Safely skips directories actively in use by another running DeployProof instance.
+    Returns the number of stale directories cleaned up.
+    """
+    if os.environ.get("DEPLOYPROOF_WORKER") == "1":
+        return 0
+
+    temp_dir = Path(tempfile.gettempdir())
+    cleaned = 0
+
+    def _is_pid_alive(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                STILL_ACTIVE = 259
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+                if not handle:
+                    err = kernel32.GetLastError()
+                    if err == 5:  # ERROR_ACCESS_DENIED means process exists and is running
+                        return True
+                    return False
+                exit_code = ctypes.c_ulong()
+                success = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                kernel32.CloseHandle(handle)
+                return bool(success and exit_code.value == STILL_ACTIVE)
+            except Exception:
+                return True  # If unable to inspect on Windows, assume alive to avoid deleting active dirs
+        else:
+            try:
+                os.kill(pid, 0)
+                return True
+            except (OSError, ProcessLookupError, PermissionError):
+                return False
+
+    try:
+        for d in temp_dir.glob("deployproof*"):
+            if not d.is_dir():
+                continue
+            # Skip if it's one of our own currently active temp dirs
+            if d in _ACTIVE_TEMP_DIRS:
+                continue
+
+            # Check for PID marker
+            pid_markers = list(d.glob(".deployproof_pid_*"))
+            is_stale = False
+            if pid_markers:
+                for marker in pid_markers:
+                    try:
+                        pid = int(marker.name.split("_")[-1])
+                        if not _is_pid_alive(pid):
+                            is_stale = True
+                        else:
+                            is_stale = False
+                            break
+                    except (ValueError, IndexError):
+                        is_stale = True
+            else:
+                # No PID marker: if directory was created >120s ago, check if stale
+                try:
+                    mtime = d.stat().st_mtime
+                    if (time.time() - mtime) > 120:
+                        is_stale = True
+                except Exception:
+                    pass
+
+            if is_stale:
+                try:
+                    shutil.rmtree(d, onerror=_on_rm_error)
+                    cleaned += 1
+                except Exception:
+                    # In use by another process on Windows/Unix; rmtree will safely fail
+                    pass
+    except Exception:
+        pass
+
+    return cleaned
 
 def _restore_current_mutant_file() -> None:
     """Immediately restore the currently mutated file on disk if one is active and clear its specific bytecode cache."""
@@ -87,8 +195,9 @@ def _restore_current_mutant_file() -> None:
 atexit.register(_restore_current_mutant_file)
 
 def _mutation_signal_handler(signum: int, frame: Any) -> None:
-    """Signal handler for SIGINT, SIGTERM, and SIGBREAK to restore on-disk source before process exit."""
+    """Signal handler for SIGINT, SIGTERM, and SIGBREAK to restore on-disk source and cleanup temp dirs before process exit."""
     _restore_current_mutant_file()
+    _cleanup_active_temp_dirs()
     if signum in (getattr(signal, 'SIGINT', 2), getattr(signal, 'SIGBREAK', 21)):
         raise KeyboardInterrupt(f'Interrupted by signal {signum} during mutation testing')
     sys.exit(128 + signum)
@@ -473,7 +582,7 @@ def _error_traces_to_mutant(output: str, mutant: Mutant) -> bool:
     return False
 
 
-def collect_skipped_constructs_for_file(file_path: Path) -> List[SkippedConstruct]:
+def collect_skipped_constructs_for_file(file_path: Path, line_ranges: Optional[Set[int]] = None) -> List[SkippedConstruct]:
     """Identify unsupported constructs in a file that Tier 1 skips."""
     try:
         source = file_path.read_text(encoding='utf-8', errors='replace')
@@ -485,10 +594,12 @@ def collect_skipped_constructs_for_file(file_path: Path) -> List[SkippedConstruc
         return []
     collector = SkippedConstructCollector(file_path, source.splitlines())
     collector.visit(tree)
+    if line_ranges is not None:
+        return [s for s in collector.skipped if s.line_number in line_ranges]
     return collector.skipped
 
-def generate_mutants_for_file(file_path: Path) -> List[Mutant]:
-    """Generate all deterministic mutants for a single Python file."""
+def generate_mutants_for_file(file_path: Path, line_ranges: Optional[Set[int]] = None) -> List[Mutant]:
+    """Generate deterministic mutants for a single Python file, optionally filtered to line_ranges."""
     try:
         source = file_path.read_text(encoding='utf-8', errors='replace')
     except Exception:
@@ -512,6 +623,8 @@ def generate_mutants_for_file(file_path: Path) -> List[Mutant]:
         except Exception:
             continue
         lineno = transformer.applied_info[0] if transformer.applied_info else 1
+        if line_ranges is not None and lineno not in line_ranges:
+            continue
         desc = transformer.applied_info[1] if transformer.applied_info else f'Mutation #{idx + 1}'
         old_val = transformer.applied_info[2] if transformer.applied_info and len(transformer.applied_info) > 2 else ''
         new_val = transformer.applied_info[3] if transformer.applied_info and len(transformer.applied_info) > 3 else ''
@@ -540,68 +653,211 @@ def generate_mutants_for_file(file_path: Path) -> List[Mutant]:
         mutants.append(Mutant(mutant_id=mutant_id, file_path=file_path, line_number=lineno, description=desc, original_line=orig_line, mutated_line=mut_line, mutated_source=mutated_source))
     return mutants
 
-def discover_target_tests(target_files: List[Path], root: Path) -> List[str]:
-    """Discover candidate pytest test targets relevant to the changed files."""
-    matched_test_files: List[str] = []
+def _error_traces_to_mutant(error_output: str, mutant: Mutant) -> bool:
+    """
+    Check if an error traceback or collection failure explicitly references the mutated file, line, or module.
+    """
+    if not error_output:
+        return False
+
+    file_name = mutant.file_path.name.lower()
+    stem = mutant.file_path.stem.lower()
+    out_lower = error_output.lower()
+
+    # 1. Exact file name in error output (e.g. "structures.py" or "core.py")
+    if file_name in out_lower:
+        return True
+
+    # 2. Specific module import error referencing this module (e.g. "no module named 'mymodule'")
+    if f"no module named '{stem}'" in out_lower:
+        return True
+    if f"no module named \"{stem}\"" in out_lower:
+        return True
+    if "cannot import name" in out_lower and (f"from '{stem}'" in out_lower or f"from \"{stem}\"" in out_lower):
+        return True
+
+    return False
+
+
+def _build_test_import_map(root: Path) -> Dict[str, Set[Path]]:
+    """
+    Build a reverse import map from imported module names to the test files that import them.
+    Scans all pytest test files across the repository.
+    """
     tests_dirs = [d for d in [root / 'tests', root / 'test'] if d.is_dir()]
     if not tests_dirs:
         tests_dirs = [root]
+
+    test_files: List[Path] = []
+    for t_dir in tests_dirs:
+        for p in t_dir.rglob('*.py'):
+            if (p.name.startswith('test_') or p.name.endswith('_test.py') or p.name == 'test.py') and p.is_file() and p.name != 'conftest.py':
+                test_files.append(p)
+
+    import_to_tests: Dict[str, Set[Path]] = {}
+
+    for tf in test_files:
+        try:
+            content = tf.read_text(encoding='utf-8', errors='replace')
+            tree = ast.parse(content, filename=str(tf))
+        except Exception:
+            continue
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    mod = alias.name
+                    import_to_tests.setdefault(mod, set()).add(tf)
+                    parts = mod.split('.')
+                    for i in range(1, len(parts)):
+                        import_to_tests.setdefault('.'.join(parts[:i]), set()).add(tf)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    mod = node.module
+                    import_to_tests.setdefault(mod, set()).add(tf)
+                    parts = mod.split('.')
+                    for i in range(1, len(parts)):
+                        import_to_tests.setdefault('.'.join(parts[:i]), set()).add(tf)
+                    for alias in node.names:
+                        full = f"{mod}.{alias.name}"
+                        import_to_tests.setdefault(full, set()).add(tf)
+
+    return import_to_tests
+
+
+def discover_target_tests(target_files: List[Path], root: Path) -> List[str]:
+    """
+    Discover candidate pytest test targets relevant to the target files with tiered precision.
+    
+    Tier 1 (High Precision):
+      - Direct filename stem matches (e.g. test_models.py for models.py, test_utils/ for utils.py).
+      - Direct submodule import matches (test files importing pkg.models, pkg.cookies, etc.).
+    
+    Tier 2 (Fallback):
+      - If Tier 1 matches nothing for a file, falls back to top-level package imports (pkg).
+      - Sorts test_<pkg>.py / test_main.py first so pytest -x kills mutants rapidly.
+    """
+    import_map = _build_test_import_map(root)
+    matched_test_files: List[str] = []
+
+    tests_dirs = [d for d in [root / "tests", root / "test"] if d.is_dir()]
+    if not tests_dirs:
+        tests_dirs = [root]
+
+    all_test_files: List[Path] = []
+    for t_dir in tests_dirs:
+        for p in t_dir.rglob("*.py"):
+            if (p.name.startswith("test_") or p.name.endswith("_test.py") or p.name == "test.py") and p.is_file() and p.name != "conftest.py":
+                all_test_files.append(p)
+
     for f in target_files:
+        tier1_matched: List[str] = []
         stem = f.stem
         stems = {stem}
-        if stem.startswith('_'):
-            stems.add(stem.lstrip('_'))
-        if stem.endswith('s') and len(stem) > 1:
-            stems.add(stem.rstrip('s'))
-            if stem.startswith('_'):
-                stems.add(stem.lstrip('_').rstrip('s'))
+        if stem.startswith("_"):
+            stems.add(stem.lstrip("_"))
+        if stem.endswith("s") and len(stem) > 1:
+            stems.add(stem.rstrip("s"))
+            if stem.startswith("_"):
+                stems.add(stem.lstrip("_").rstrip("s"))
         else:
-            stems.add(stem + 's')
-            if stem.startswith('_'):
-                stems.add(stem.lstrip('_') + 's')
-        direct_matched: List[str] = []
-        for t_dir in tests_dirs:
-            for test_path in t_dir.rglob('*.py'):
-                filename = test_path.name
-                for s in stems:
-                    if filename in (f'test_{s}.py', f'{s}_test.py', f'test_{s}s.py') or (s.endswith('s') and filename == f'test_{s[:-1]}.py'):
-                        try:
-                            rel = str(test_path.relative_to(root))
-                        except ValueError:
-                            rel = str(test_path)
-                        if rel not in direct_matched:
-                            direct_matched.append(rel)
+            stems.add(stem + "s")
+            if stem.startswith("_"):
+                stems.add(stem.lstrip("_") + "s")
+
+        # 1. Direct Filename Stem Matching (Highest Priority)
+        for tf in all_test_files:
+            filename = tf.name
+            tf_parts = [p.lower() for p in tf.parts]
+            is_stem_match = False
             for s in stems:
-                for match_dir in t_dir.rglob(s):
-                    if match_dir.is_dir():
-                        for test_file in match_dir.rglob('*.py'):
-                            if test_file.name.startswith('test_') or test_file.name.endswith('_test.py'):
-                                try:
-                                    rel = str(test_file.relative_to(root))
-                                except ValueError:
-                                    rel = str(test_file)
-                                if rel not in direct_matched:
-                                    direct_matched.append(rel)
-        if direct_matched:
-            for m in direct_matched:
-                if m not in matched_test_files:
-                    matched_test_files.append(m)
-        else:
+                if filename in (f"test_{s}.py", f"{s}_test.py", f"test_{s}s.py") or (s.endswith("s") and filename == f"test_{s[:-1]}.py"):
+                    is_stem_match = True
+                    break
+                if f"test_{s}" in tf_parts or f"{s}_test" in tf_parts or s in tf_parts:
+                    is_stem_match = True
+                    break
+            if is_stem_match:
+                try:
+                    rel_tf = str(tf.relative_to(root))
+                except ValueError:
+                    rel_tf = str(tf)
+                if rel_tf not in tier1_matched:
+                    tier1_matched.append(rel_tf)
+
+        # 2. Specific Submodule Import Matching
+        try:
+            rel = f.relative_to(root)
+        except ValueError:
+            rel = f
+
+        parts = list(rel.parts)
+        if parts and parts[0] == "src":
+            parts = parts[1:]
+
+        top_mod = ""
+        if parts:
+            clean_parts = list(parts)
+            if clean_parts[-1].endswith(".py"):
+                clean_parts[-1] = clean_parts[-1][:-3]
+            if clean_parts[-1] == "__init__":
+                clean_parts = clean_parts[:-1]
+
+            if clean_parts:
+                top_mod = clean_parts[0]
+                specific_mod = ".".join(clean_parts)
+                if specific_mod in import_map:
+                    for tf in sorted(import_map[specific_mod], key=lambda x: str(x)):
+                        try:
+                            rel_tf = str(tf.relative_to(root))
+                        except ValueError:
+                            rel_tf = str(tf)
+                        if rel_tf not in tier1_matched:
+                            tier1_matched.append(rel_tf)
+
+        # 3. Tier 2 Fallback: If no direct stem or specific submodule imports found
+        if not tier1_matched:
+            tier2_matched: List[str] = []
+            # Check parent directory stem match
             parent_name = f.parent.name
             parent_stems = {parent_name}
-            if parent_name.startswith('_'):
-                parent_stems.add(parent_name.lstrip('_'))
-            for t_dir in tests_dirs:
-                for test_path in t_dir.rglob('*.py'):
-                    filename = test_path.name
-                    for ps in parent_stems:
-                        if filename in (f'test_{ps}.py', f'{ps}_test.py'):
-                            try:
-                                rel = str(test_path.relative_to(root))
-                            except ValueError:
-                                rel = str(test_path)
-                            if rel not in matched_test_files:
-                                matched_test_files.append(rel)
+            if parent_name.startswith("_"):
+                parent_stems.add(parent_name.lstrip("_"))
+            for tf in all_test_files:
+                filename = tf.name
+                for ps in parent_stems:
+                    if filename in (f"test_{ps}.py", f"{ps}_test.py"):
+                        try:
+                            rel_tf = str(tf.relative_to(root))
+                        except ValueError:
+                            rel_tf = str(tf)
+                        if rel_tf not in tier2_matched:
+                            tier2_matched.append(rel_tf)
+
+            # Fallback to top-level package imports
+            if top_mod and top_mod in import_map:
+                for tf in sorted(import_map[top_mod], key=lambda x: str(x)):
+                    try:
+                        rel_tf = str(tf.relative_to(root))
+                    except ValueError:
+                        rel_tf = str(tf)
+                    if rel_tf not in tier2_matched:
+                        tier2_matched.append(rel_tf)
+
+            # Order fallback tests with primary test_<package>.py first
+            tier2_matched.sort(key=lambda x: (
+                0 if f"test_{top_mod}.py" in x.lower() or f"{top_mod}_test.py" in x.lower() else
+                1 if "test_main.py" in x.lower() or "test_core.py" in x.lower() else 2,
+                x
+            ))
+            selected_tests = tier2_matched
+        else:
+            selected_tests = tier1_matched
+
+        for m in selected_tests:
+            if m not in matched_test_files:
+                matched_test_files.append(m)
+
     return matched_test_files
 
 
@@ -618,6 +874,45 @@ def _cleanup_pyc_in_dir(directory: Path) -> None:
             pyc.unlink(missing_ok=True)
         except Exception:
             pass
+
+
+def _calculate_baseline_timeout(
+    pytest_args: List[str],
+    root: Path,
+    test_runner_timeout: float = 10.0,
+) -> float:
+    """
+    Calculate an adaptive baseline timeout that scales with test file count, total test suite size,
+    and coverage instrumentation overhead (crucial for multi-file --full-repo suites).
+    """
+    base_min = max(60.0, test_runner_timeout * 4.0)
+    per_file_allowance = len(pytest_args) * 35.0
+
+    total_test_bytes = 0
+    for arg in pytest_args:
+        # Strip pytest node specifiers (e.g. tests/test_foo.py::test_bar)
+        clean_path_str = arg.split("::")[0]
+        test_path = Path(clean_path_str)
+        if not test_path.is_absolute():
+            test_path = root / test_path
+        if test_path.is_file():
+            try:
+                total_test_bytes += test_path.stat().st_size
+            except OSError:
+                pass
+        elif test_path.is_dir():
+            try:
+                for p in test_path.glob("**/*.py"):
+                    total_test_bytes += p.stat().st_size
+            except OSError:
+                pass
+
+    total_test_kb = total_test_bytes / 1024.0
+    size_allowance = total_test_kb * 2.5
+
+    multi_file_factor = 1.25 if len(pytest_args) > 1 else 1.0
+    computed_timeout = max(base_min, per_file_allowance, size_allowance) * multi_file_factor
+    return max(60.0, round(computed_timeout, 1))
 
 
 def _run_single_mutant_in_sandbox(
@@ -657,6 +952,17 @@ def _run_single_mutant_in_sandbox(
             }
 
     target_file = worker_dir / rel_file_path_str
+    if not target_file.is_file():
+        try:
+            snapshot_target = snapshot_dir / rel_file_path_str
+            if snapshot_target.is_file():
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(snapshot_target, target_file)
+            else:
+                shutil.copytree(snapshot_dir, worker_dir, dirs_exist_ok=True)
+        except Exception:
+            pass
+
     try:
         original_code = target_file.read_text(encoding="utf-8", errors="replace")
     except Exception as e:
@@ -668,6 +974,7 @@ def _run_single_mutant_in_sandbox(
 
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["DEPLOYPROOF_WORKER"] = "1"
     paths_to_add = []
     if (worker_dir / "src").is_dir():
         paths_to_add.append(str(worker_dir / "src"))
@@ -684,14 +991,22 @@ def _run_single_mutant_in_sandbox(
         "-m",
         "pytest",
         "-q",
-        "--tb=no",
+        "--tb=short",
         "-o",
         f"cache_dir={worker_cache}",
         f"--basetemp={worker_tmp}",
     ]
     if baseline_errors == 0:
         cmd.append("-x")
-    cmd.extend(pytest_args)
+    
+    effective_pytest_args = list(pytest_args)
+    if len(effective_pytest_args) > 15:
+        top_dirs = set(Path(p).parts[0] for p in effective_pytest_args if Path(p).parts)
+        if top_dirs and all((worker_dir / d).is_dir() for d in top_dirs):
+            effective_pytest_args = sorted(list(top_dirs))
+        else:
+            effective_pytest_args = effective_pytest_args[:15]
+    cmd.extend(effective_pytest_args)
 
     status = "SURVIVED"
     error_msg = None
@@ -737,9 +1052,21 @@ def _run_single_mutant_in_sandbox(
         elif mut_passed > 0 and mut_failed == 0 and mut_errors <= baseline_errors:
             status = "SURVIVED"
         elif res.returncode in (2, 3, 4):
-            status = "RUNNER_ERROR"
-            concise = extract_collection_error(combined_out, res.returncode)
-            error_msg = f"Pytest exit code {res.returncode}: {concise}"
+            temp_mutant = Mutant(
+                mutant_id=mutant_id,
+                file_path=Path(rel_file_path_str),
+                line_number=line_number,
+                description=description,
+                original_line=original_line,
+                mutated_line=mutated_line,
+                mutated_source=mutated_source,
+            )
+            if _error_traces_to_mutant(combined_out, temp_mutant):
+                status = "KILLED"
+            else:
+                status = "RUNNER_ERROR"
+                concise = extract_collection_error(combined_out, res.returncode)
+                error_msg = f"Pytest exit code {res.returncode}: {concise}"
         else:
             status = "SURVIVED"
     except subprocess.TimeoutExpired:
@@ -766,6 +1093,9 @@ def _run_mutation_tests_sequential(
     repo_root: Optional[Path] = None,
     test_runner_timeout: float = 10.0,
     extra_pytest_args: Optional[List[str]] = None,
+    is_full_repo: bool = False,
+    base: Optional[str] = None,
+    quiet: bool = False,
 ) -> MutationResult:
     """
     Execute targeted sequential mutation testing across target files (diff-scoped mode).
@@ -778,10 +1108,14 @@ def _run_mutation_tests_sequential(
 
     for f in target_files:
         if f.is_file() and f.suffix == '.py':
-            f_mutants = generate_mutants_for_file(f)
+            line_ranges = None
+            if not is_full_repo:
+                from deployproof.diff import get_modified_line_ranges
+                line_ranges = get_modified_line_ranges(f, root, base=base)
+            f_mutants = generate_mutants_for_file(f, line_ranges=line_ranges)
             file_mutants_map[f] = f_mutants
             total_mutants_count += len(f_mutants)
-            all_skipped.extend(collect_skipped_constructs_for_file(f))
+            all_skipped.extend(collect_skipped_constructs_for_file(f, line_ranges=line_ranges))
 
     if total_mutants_count == 0:
         return MutationResult(total_mutants=0, killed_mutants=0, survived_mutants=[], untested_files=[], runner_errors=[], skipped_constructs=all_skipped, mutation_score=100.0, duration_seconds=round(time.time() - start_time, 2), files_tested=target_files)
@@ -790,6 +1124,8 @@ def _run_mutation_tests_sequential(
     survived: List[Mutant] = []
     runner_errors: List[Tuple[Mutant, str]] = []
     untested_files_set: Set[Path] = set()
+    completed_mutants = 0
+    last_progress_print = 0.0
 
     env = os.environ.copy()
     env['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -826,7 +1162,7 @@ def _run_mutation_tests_sequential(
 
             pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=short', '-p', 'no:cacheprovider'] + pytest_args
             t0 = time.time()
-            baseline_timeout = max(test_runner_timeout * 3.0, 45.0, len(pytest_args) * 15.0)
+            baseline_timeout = _calculate_baseline_timeout(pytest_args, root, test_runner_timeout)
 
             try:
                 baseline_res = subprocess.run(
@@ -894,12 +1230,29 @@ def _run_mutation_tests_sequential(
 
             effective_timeout = max(test_runner_timeout, baseline_duration * 3.0 + 5.0)
             baseline_has_errors = baseline_summary.get('errors', 0) > 0
-            mutant_pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=no', '-p', 'no:cacheprovider']
+            mutant_pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=short', '-p', 'no:cacheprovider']
             if not baseline_has_errors:
                 mutant_pytest_cmd.append('-x')
             mutant_pytest_cmd.extend(pytest_args)
 
             for mutant in mutants:
+                completed_mutants += 1
+                now = time.time()
+                if not quiet and (
+                    (completed_mutants == 1)
+                    or (completed_mutants % 5 == 0)
+                    or (now - last_progress_print >= 5.0)
+                    or (completed_mutants == total_mutants_count)
+                ):
+                    if (now - last_progress_print >= 0.5) or (completed_mutants == total_mutants_count):
+                        last_progress_print = now
+                        elapsed = now - start_time
+                        elapsed_str = f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s"
+                        print(
+                            f"  [{completed_mutants}/{total_mutants_count} mutants] elapsed: {elapsed_str}",
+                            flush=True,
+                        )
+
                 original_code = mutant.file_path.read_text(encoding='utf-8', errors='replace')
                 _CURRENT_MUTATED_FILE = mutant.file_path
                 _CURRENT_ORIGINAL_CONTENT = original_code
@@ -941,10 +1294,14 @@ def _run_mutation_tests_sequential(
                         mutant.status = 'SURVIVED'
                         survived.append(mutant)
                     elif res.returncode in (2, 3, 4):
-                        mutant.status = 'RUNNER_ERROR'
-                        concise_err = extract_collection_error(combined_out, res.returncode)
-                        err_msg = f'Pytest exit code {res.returncode}: {concise_err}'
-                        runner_errors.append((mutant, err_msg))
+                        if _error_traces_to_mutant(combined_out, mutant):
+                            mutant.status = 'KILLED'
+                            killed_count += 1
+                        else:
+                            mutant.status = 'RUNNER_ERROR'
+                            concise_err = extract_collection_error(combined_out, res.returncode)
+                            err_msg = f'Pytest exit code {res.returncode}: {concise_err}'
+                            runner_errors.append((mutant, err_msg))
                     else:
                         mutant.status = 'SURVIVED'
                         survived.append(mutant)
@@ -987,6 +1344,8 @@ def run_mutation_tests_parallel(
     test_runner_timeout: float = 10.0,
     extra_pytest_args: Optional[List[str]] = None,
     workers: Optional[int] = None,
+    is_full_repo: bool = False,
+    base: Optional[str] = None,
     quiet: bool = False,
 ) -> MutationResult:
     """
@@ -998,11 +1357,9 @@ def run_mutation_tests_parallel(
     start_time = time.time()
 
     # 1. Determine worker count (sane cap at 8 by default)
-    max_workers = min(os.cpu_count() or 4, 8)
-    if workers is not None and workers > 0:
-        actual_workers = min(workers, 32)
-    else:
-        actual_workers = max_workers
+    import multiprocessing
+    cpu_count = multiprocessing.cpu_count() or 1
+    actual_workers = min(cpu_count, 8) if workers is None else max(1, workers)
 
     # 2. Collect mutants and skipped constructs
     file_mutants_map: Dict[Path, List[Mutant]] = {}
@@ -1011,10 +1368,14 @@ def run_mutation_tests_parallel(
 
     for f in target_files:
         if f.is_file() and f.suffix == '.py':
-            f_mutants = generate_mutants_for_file(f)
+            line_ranges = None
+            if not is_full_repo:
+                from deployproof.diff import get_modified_line_ranges
+                line_ranges = get_modified_line_ranges(f, root, base=base)
+            f_mutants = generate_mutants_for_file(f, line_ranges=line_ranges)
             file_mutants_map[f] = f_mutants
             total_mutants_count += len(f_mutants)
-            all_skipped.extend(collect_skipped_constructs_for_file(f))
+            all_skipped.extend(collect_skipped_constructs_for_file(f, line_ranges=line_ranges))
 
     if total_mutants_count == 0:
         return MutationResult(
@@ -1066,8 +1427,14 @@ def run_mutation_tests_parallel(
         )
 
     # 4. Prepare worker sandboxes in temp directory
+    cleanup_stale_deployproof_temp_dirs()
     temp_dir_obj = tempfile.TemporaryDirectory(prefix="deployproof_workers_")
     temp_base = Path(temp_dir_obj.name)
+    _ACTIVE_TEMP_DIRS.add(temp_base)
+    try:
+        (temp_base / f".deployproof_pid_{os.getpid()}").touch()
+    except Exception:
+        pass
 
     env_pythonpath = os.environ.get("PYTHONPATH", "")
     from deployproof.diff import resolve_full_repo_session_files
@@ -1088,12 +1455,23 @@ def run_mutation_tests_parallel(
             dest_p.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src_file, dest_p)
 
-        # 5. Baseline runs for unique test suites
+        # Ensure coverage plugin is copied into snapshot as a standalone module
+        # so pytest can load it via -p _deployproof_cov_plugin regardless of package install status
+        plugin_src = Path(__file__).resolve().parent / "coverage_plugin.py"
+        if plugin_src.is_file():
+            shutil.copy2(plugin_src, snapshot_dir / "_deployproof_cov_plugin.py")
+            if (snapshot_dir / "src" / "deployproof").is_dir():
+                shutil.copy2(plugin_src, snapshot_dir / "src" / "deployproof" / "coverage_plugin.py")
+
+        # 5. Baseline runs for unique test suites with dynamic coverage context recording
         suite_baseline_cache: Dict[Tuple[str, ...], Tuple[bool, int, float, bool, Optional[str]]] = {}
         file_baseline_info: Dict[Path, Tuple[int, float]] = {}
         env_snapshot = os.environ.copy()
         env_snapshot["PYTHONDONTWRITEBYTECODE"] = "1"
+        env_snapshot["DEPLOYPROOF_WORKER"] = "1"
         paths_to_add = []
+        pkg_root = Path(__file__).resolve().parent.parent
+        paths_to_add.append(str(pkg_root))
         if (snapshot_dir / "src").is_dir():
             paths_to_add.append(str(snapshot_dir / "src"))
         paths_to_add.append(str(snapshot_dir))
@@ -1103,21 +1481,33 @@ def run_mutation_tests_parallel(
 
         snapshot_cache = snapshot_dir / ".pytest_cache"
         snapshot_tmp = snapshot_dir / ".pytest_tmp"
+        cov_source = str(snapshot_dir / "src") if (snapshot_dir / "src").is_dir() else str(snapshot_dir)
 
         for f in tested_files:
             pytest_args = file_test_map[f]
             suite_key = tuple(pytest_args)
 
             if suite_key not in suite_baseline_cache:
+                if not quiet:
+                    print(f"DeployProof: Running baseline test suite on {len(pytest_args)} test file(s) (collecting coverage map)...", flush=True)
                 t0 = time.time()
-                baseline_timeout = max(test_runner_timeout * 3.0, 45.0, len(pytest_args) * 15.0)
+                baseline_timeout = _calculate_baseline_timeout(pytest_args, snapshot_dir, test_runner_timeout)
+                
+                # Attempt coverage-guided baseline run
                 pytest_cmd = [
                     sys.executable,
                     "-B",
                     "-m",
+                    "coverage",
+                    "run",
+                    "-p",
+                    f"--source={cov_source}",
+                    "-m",
                     "pytest",
                     "-q",
                     "--tb=short",
+                    "-p",
+                    "_deployproof_cov_plugin",
                     "-o",
                     f"cache_dir={snapshot_cache}",
                     f"--basetemp={snapshot_tmp}",
@@ -1134,6 +1524,29 @@ def run_mutation_tests_parallel(
                         errors="replace",
                         timeout=baseline_timeout,
                     )
+                    # If coverage run failed to execute, fallback to standard pytest
+                    if baseline_res.returncode not in (0, 1, 5) and ("coverage" in (baseline_res.stderr.lower() + baseline_res.stdout.lower())):
+                        fallback_cmd = [
+                            sys.executable,
+                            "-B",
+                            "-m",
+                            "pytest",
+                            "-q",
+                            "--tb=short",
+                            "-o",
+                            f"cache_dir={snapshot_cache}",
+                            f"--basetemp={snapshot_tmp}",
+                        ] + pytest_args
+                        baseline_res = subprocess.run(
+                            fallback_cmd,
+                            cwd=snapshot_dir,
+                            env=env_snapshot,
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            timeout=baseline_timeout,
+                        )
                 except Exception as e:
                     return MutationResult(
                         total_mutants=total_mutants_count,
@@ -1149,6 +1562,8 @@ def run_mutation_tests_parallel(
                     )
 
                 baseline_duration = max(time.time() - t0, 0.5)
+                if not quiet:
+                    print(f"DeployProof: Baseline test run completed in {baseline_duration:.1f}s.", flush=True)
                 combined_output = baseline_res.stdout + "\n" + baseline_res.stderr
                 baseline_summary = parse_pytest_summary(combined_output)
 
@@ -1192,7 +1607,37 @@ def run_mutation_tests_parallel(
             else:
                 file_baseline_info[f] = (base_errors, eff_timeout)
 
-        # 6. Build list of mutant tasks
+        # 5b. Extract per-file line-to-test coverage context mapping
+        file_line_contexts: Dict[Path, Dict[int, List[str]]] = {}
+        try:
+            import coverage
+            cov = coverage.Coverage()
+            try:
+                cov.combine(data_paths=[str(snapshot_dir)])
+            except Exception:
+                pass
+            cov.load()
+            cov_data = cov.get_data()
+            for mf in cov_data.measured_files():
+                mf_p = Path(mf).resolve()
+                try:
+                    rel_p = mf_p.relative_to(snapshot_dir.resolve())
+                    orig_p = (root / rel_p).resolve()
+                except ValueError:
+                    orig_p = mf_p
+
+                ctx_map = cov_data.contexts_by_lineno(mf)
+                clean_ctx: Dict[int, List[str]] = {}
+                for l_no, ctx_list in ctx_map.items():
+                    valid_tests = [c for c in ctx_list if c and c.strip()]
+                    if valid_tests:
+                        clean_ctx[l_no] = sorted(list(set(valid_tests)))
+                if clean_ctx:
+                    file_line_contexts[orig_p] = clean_ctx
+        except Exception:
+            file_line_contexts = {}
+
+        # 6. Build list of mutant tasks with coverage-guided test selection
         tasks = []
         mutants_by_id: Dict[str, Mutant] = {}
         temp_base_str = str(temp_base)
@@ -1202,14 +1647,30 @@ def run_mutation_tests_parallel(
             if f in untested_files_set or f not in file_baseline_info:
                 continue
             baseline_errors, effective_timeout = file_baseline_info[f]
-            pytest_args = file_test_map[f]
+            default_pytest_args = file_test_map[f]
             try:
                 rel_f_str = f.relative_to(root).as_posix()
             except ValueError:
                 rel_f_str = f.name
 
+            # Lookup file's coverage contexts
+            f_contexts = {}
+            f_resolved = f.resolve()
+            for stored_path, ctx_map in file_line_contexts.items():
+                if stored_path == f_resolved or str(stored_path).lower() == str(f_resolved).lower():
+                    f_contexts = ctx_map
+                    break
+
             for m in mutants:
                 mutants_by_id[m.mutant_id] = m
+                mutant_pytest_args = default_pytest_args
+                try:
+                    covering_tests = f_contexts.get(m.line_number, [])
+                    if covering_tests:
+                        mutant_pytest_args = covering_tests
+                except Exception:
+                    mutant_pytest_args = default_pytest_args
+
                 tasks.append((
                     temp_base_str,
                     snapshot_dir_str,
@@ -1220,7 +1681,7 @@ def run_mutation_tests_parallel(
                     m.original_line,
                     m.mutated_line,
                     m.mutated_source,
-                    pytest_args,
+                    mutant_pytest_args,
                     baseline_errors,
                     effective_timeout,
                     env_pythonpath,
@@ -1286,14 +1747,20 @@ def run_mutation_tests_parallel(
 
                 # Live progress update
                 now = time.time()
-                if not quiet and (now - last_progress_print >= 2.0 or completed_mutants == active_mutant_count):
-                    last_progress_print = now
-                    elapsed = now - start_time
-                    elapsed_str = f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s"
-                    print(
-                        f"  [{completed_mutants}/{active_mutant_count} mutants | {len(completed_files_set)}/{total_tested_files_count} files] elapsed: {elapsed_str}",
-                        flush=True,
-                    )
+                if not quiet and (
+                    (completed_mutants == 1)
+                    or (completed_mutants % 5 == 0)
+                    or (now - last_progress_print >= 5.0)
+                    or (completed_mutants == active_mutant_count)
+                ):
+                    if (now - last_progress_print >= 0.5) or (completed_mutants == active_mutant_count):
+                        last_progress_print = now
+                        elapsed = now - start_time
+                        elapsed_str = f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s"
+                        print(
+                            f"  [{completed_mutants}/{active_mutant_count} mutants | {len(completed_files_set)}/{total_tested_files_count} files] elapsed: {elapsed_str}",
+                            flush=True,
+                        )
 
         if not quiet and active_mutant_count > 0:
             print("", flush=True)
@@ -1321,10 +1788,14 @@ def run_mutation_tests_parallel(
         )
 
     finally:
+        _ACTIVE_TEMP_DIRS.discard(temp_base)
         try:
             temp_dir_obj.cleanup()
         except Exception:
-            pass
+            try:
+                shutil.rmtree(temp_base, onerror=_on_rm_error)
+            except Exception:
+                pass
 
 
 def run_mutation_tests(
@@ -1334,6 +1805,7 @@ def run_mutation_tests(
     extra_pytest_args: Optional[List[str]] = None,
     workers: Optional[int] = None,
     is_full_repo: bool = False,
+    base: Optional[str] = None,
     quiet: bool = False,
 ) -> MutationResult:
     """
@@ -1349,6 +1821,8 @@ def run_mutation_tests(
             test_runner_timeout=test_runner_timeout,
             extra_pytest_args=extra_pytest_args,
             workers=workers,
+            is_full_repo=is_full_repo,
+            base=base,
             quiet=quiet,
         )
     return _run_mutation_tests_sequential(
@@ -1356,4 +1830,7 @@ def run_mutation_tests(
         repo_root=repo_root,
         test_runner_timeout=test_runner_timeout,
         extra_pytest_args=extra_pytest_args,
+        is_full_repo=is_full_repo,
+        base=base,
+        quiet=quiet,
     )

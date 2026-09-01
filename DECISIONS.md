@@ -165,4 +165,25 @@ Testing DeployProof against diverse, large-scale production codebases revealed 5
   - Registered an `atexit` fallback hook as defense-in-depth against sudden process termination.
   - Ensured any restoration failure during signal handling prints an immediate, visible warning to `sys.stderr` rather than failing silently.
 
+### 7. Sandbox Snapshot Liveness Probing & Concurrency Safety (`mutator.py`)
+- **Observed Defect**: When running multiple concurrent `deployproof check` instances (e.g. parallel terminals or audits), the startup routine `cleanup_stale_deployproof_temp_dirs()` checked if temporary directories were orphaned using POSIX `os.kill(pid, 0)`. On Windows, `os.kill(pid, 0)` is invalid and raises `OSError: [WinError 87] The parameter is incorrect`, causing the cleaner to falsely conclude that active sibling processes were dead and delete their worker sandboxes mid-run (producing 435 `[Errno 2] No such file or directory` runner errors).
+- **Architectural Decision**:
+  - On Windows, replaced `os.kill(pid, 0)` with the Win32 API (`kernel32.OpenProcess` with `PROCESS_QUERY_LIMITED_INFORMATION` and `kernel32.GetExitCodeProcess`), accurately detecting live Windows processes and preventing active sandbox deletion.
+  - Added a defensive self-healing fallback in `_run_single_mutant_in_sandbox`: if `target_file` is ever missing from a worker sandbox, it automatically restores the missing file directly from the pristine `snapshot_dir` rather than erroring out.
 
+### 8. Full-Repository Mode Runtime & Correctness Boundary
+- **Observed Defect / Evaluation**: When auditing massive third-party codebases with heavy network/socket tests (`requests`), full-repo sweeps require ~65–75 minutes across all 795 mutants.
+- **Architectural Decision**:
+  - Confirmed via research that further narrowing test files on modules whose coverage falls back to shared integration test suites (`test_requests.py`) is fundamentally unsound in Python due to dynamic dispatch, monkeypatching, and transitive coverage.
+  - Established that `--full-repo` mode's fallback behavior is correct and final: correctness and true mutation score accuracy take strict precedence over synthetic speedups (documented in `FUTURE_SCOPE.md`). The fast path remains diff-scoped `deployproof check` (2–5 seconds).
+
+### 9. Multi-Worker Parallel Sandboxing Engine & Trade-Off Architecture (`mutator.py`, `cli.py`)
+- **Motivation**: Full repository audits (`--full-repo`) and large multi-file refactors generate hundreds of mutants. Running test suites sequentially scales linearly with the test runtime ($O(\text{mutants} \times \text{test\_duration})$), taking 30–60 minutes.
+- **Architectural Decision**:
+  - Implemented `ProcessPoolExecutor`-based parallelization with PID-keyed temporary sandbox directories (`worker_<PID>`).
+  - Isolated pytest cache roots (`--override-ini=cache_dir=...`) and basetemp roots (`--basetemp=...`) per worker to eliminate file locking, cache corruption, and test state leakage.
+  - Set `DEPLOYPROOF_WORKER=1` in subprocess environments to prevent recursive cleanup routines from deleting sibling worker sandboxes.
+- **Trade-Off Boundaries & Usage Guidance**:
+  - **Diff-Scoped Checks (1–3 files, < 20 mutants)**: Defaults to sequential in-place mutation. Spawning isolated sandboxes and copying the repository tree introduces 1–2s of snapshot overhead, whereas in-place sequential execution finishes in **2–5s total**.
+  - **Large Diffs (100+ mutants) & Full-Repo Audits**: Users supply `--workers N` (or default to auto-detected CPU cores capped at 8) for near-linear multi-core acceleration.
+  - **Disk Space & I/O Consideration**: Running $N$ workers creates $N$ copies of the repository in `tempfile.gettempdir()` ($N \times \text{repo size}$). On disk-constrained systems, worker count should be capped (e.g. `--workers 2` or `--workers 4`).

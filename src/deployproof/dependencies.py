@@ -229,6 +229,70 @@ STDLIB_MODULES: Set[str] = set(getattr(sys, "stdlib_module_names", set())) | {
     "zoneinfo",
 }
 
+# Legacy Python 2 standard library modules (for compatibility shims and backports)
+LEGACY_STDLIB_MODULES: Set[str] = {
+    "BaseHTTPServer",
+    "Bastion",
+    "CGIHTTPServer",
+    "ConfigParser",
+    "Cookie",
+    "DocXMLRPCServer",
+    "HTMLParser",
+    "MimeWriter",
+    "Queue",
+    "SimpleHTTPServer",
+    "SimpleXMLRPCServer",
+    "SocketServer",
+    "StringIO",
+    "UserDict",
+    "UserList",
+    "UserString",
+    "al",
+    "anydbm",
+    "cPickle",
+    "cStringIO",
+    "cd",
+    "commands",
+    "cookielib",
+    "copy_reg",
+    "dbhash",
+    "dumbdbm",
+    "dummy_thread",
+    "dummy_threading",
+    "fl",
+    "fm",
+    "fpformat",
+    "gdbm",
+    "gl",
+    "hotshot",
+    "htmlentitydefs",
+    "htmllib",
+    "httplib",
+    "imgfile",
+    "jpeg",
+    "md5",
+    "mimetools",
+    "mimify",
+    "mutex",
+    "new",
+    "posixfile",
+    "repr",
+    "rfc822",
+    "rotor",
+    "sets",
+    "sha",
+    "statvfs",
+    "sunaudio",
+    "sv",
+    "thread",
+    "urllib2",
+    "urlparse",
+    "whichdb",
+    "xmlrpclib",
+}
+
+STDLIB_MODULES = STDLIB_MODULES | LEGACY_STDLIB_MODULES
+
 # Mapping of common top-level Python import names to their PyPI distribution package names
 IMPORT_TO_PYPI_MAP: Dict[str, str] = {
     "yaml": "PyYAML",
@@ -986,7 +1050,7 @@ def query_pypi_registry(
     url = f"https://pypi.org/pypi/{canonical_pkg}/json"
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": "DeployProof/0.2.2 (https://github.com/SVSPraveen/DeployProof)"},
+        headers={"User-Agent": "DeployProof/1.0.0 (https://github.com/SVSPraveen/DeployProof)"},
     )
 
     try:

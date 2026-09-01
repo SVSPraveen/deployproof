@@ -19,6 +19,9 @@ IGNORED_DIRS = {
     ".git",
     "__pycache__",
     ".pytest_cache",
+    "docs",
+    "doc",
+    ".github",
 }
 
 
@@ -94,6 +97,36 @@ def is_test_file(path: Path) -> bool:
     parts = [p.lower() for p in path.parts]
     if "tests" in parts or "test" in parts or "testing" in parts:
         return True
+    return False
+
+
+def is_excluded_mutation_target(path: Path, root: Optional[Path] = None) -> bool:
+    """
+    Determine whether a Python file should be excluded from mutation testing.
+    
+    Excludes test files, documentation directories, Sphinx configs, setup.py,
+    conftest files, and untargeted config files (*_config.py).
+    """
+    if is_test_file(path):
+        return True
+
+    name = path.name.lower()
+    if name in {"setup.py", "conf.py"}:
+        return True
+
+    parts = [p.lower() for p in path.parts]
+    if "docs" in parts or "doc" in parts or ".github" in parts:
+        return True
+
+    if name.endswith("_config.py"):
+        if root:
+            from deployproof.mutator import discover_target_tests
+            target_tests = discover_target_tests([path], root)
+            if not target_tests:
+                return True
+        else:
+            return True
+
     return False
 
 
@@ -222,14 +255,19 @@ def resolve_changed_python_files(
     """
     Resolve list of changed Python files based on the Smart Session Cascade or --base flag.
     
-    Excludes virtualenvs, build directories, and test files (unless include_tests=True).
+    Excludes virtualenvs, build directories, documentation, setup.py, and test files (unless include_tests=True).
     Returns sorted list of absolute Paths.
     """
     all_session_files = resolve_changed_session_files(cwd=cwd, base=base)
     py_files = [p for p in all_session_files if p.suffix == ".py"]
 
     if not include_tests:
-        py_files = [p for p in py_files if not is_test_file(p)]
+        target_dir = (cwd or Path.cwd()).resolve()
+        try:
+            root = get_git_root(target_dir)
+        except DiffScopeError:
+            root = target_dir
+        py_files = [p for p in py_files if not is_excluded_mutation_target(p, root)]
 
     return sorted(py_files)
 

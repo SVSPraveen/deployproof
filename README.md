@@ -2,10 +2,10 @@
 
 > Deterministic pre-push verification for AI-assisted codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v0.2.2-007ec6.svg)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/badge/pypi-v1.0.0-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-94%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
+[![Tests](https://img.shields.io/badge/tests-111%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
 [![Stress Tests](https://img.shields.io/badge/stress%20tests-11%2F11%20passed-2ea44f.svg)](stress_fixtures/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -15,6 +15,8 @@
 
 AI-assisted development introduces subtle failure modes that standard linters and coverage tools miss: test suites with high line coverage but near-zero mutation scores, hardcoded credentials generated in passing, symlinks that deceive approval prompts into escaping the repository sandbox, silently swallowed exceptions, and package names hallucinated by LLMs that don't exist on PyPI. DeployProof catches these at the pre-push stage, before they reach CI or production.
 
+> **Privacy & Security Guarantee**: DeployProof runs 100% locally on your machine. It makes zero outbound network calls, except for querying the official PyPI registry (JSON API) to verify that newly introduced dependencies exist and are not hallucinated. DeployProof sends no source code, telemetry, test results, or secret findings to any external server.
+
 ## Install
 
 ```bash
@@ -23,19 +25,69 @@ pip install deployproof
 
 Requires Python 3.10+.
 
-## Quickstart
+## How to Use DeployProof
 
-Initialize in your repository:
+DeployProof provides two distinct modes of operation. We believe in total transparency about execution costs:
 
-```bash
-deployproof init
-```
-
-Run all verification checks against changes in the current session (git diff):
+### 1. Diff-Scoped Pre-Push Gate (`deployproof check`) — *Primary Fast Workflow*
+Evaluates **only the files modified in your active session or git diff** (1–3 files typically). Because only newly edited AST nodes are mutated, it executes in **2 to 5 seconds** in local developer loops, pre-commit hooks, and pre-push gates.
 
 ```bash
+# Fast daily check: verifies modified files in your current working tree / git diff (2-5s)
 deployproof check
+
+# Output structured JSON for automation or IDE tooling
+deployproof check --json
+
+# Enforce strict gates on newly introduced mocks or swallowed errors
+deployproof check --strict-mocks --strict-error-handling
 ```
+
+### 2. Full Repository Audit Mode (`deployproof check --full-repo`) — *Thorough Codebase Audits*
+Evaluates **every tracked Python file across the entire repository**. Because mutation testing generates hundreds or thousands of mutants and runs the test suite against each one in isolated multi-worker sandboxes, full repository scans take real, honest compute time:
+
+```bash
+# Run a full-repository audit across all tracked files
+deployproof check --full-repo
+
+# Customize the parallel worker process count (defaults to auto-detected CPU count capped at 8)
+deployproof check --full-repo --workers 8
+```
+
+#### Real-World Timing Expectations:
+| Scan Mode | Target Scope | Typical Duration | Intended Use Case |
+| :--- | :--- | :--- | :--- |
+| **`deployproof check`** | Git Diff (1–3 modified files) | **2 – 5 seconds** | Local pre-commit, active AI IDE coding loops, pre-push sanity checks. |
+| **`deployproof check --workers 8`** | Large Multi-File Diff (100+ mutants) | **1 – 3 minutes** | Large feature branch reviews, refactors. |
+| **`deployproof check --full-repo`** | Small Repo (< 100 mutants) | **30s – 2 minutes** | Initial repo onboarding, weekly audits. |
+| **`deployproof check --full-repo`** | Medium Repo (200–500 mutants) | **5 – 15 minutes** | Release validation, scheduled CI jobs. |
+| **`deployproof check --full-repo`** | Heavy / Network Lib (`requests`, 800 mutants) | **60 – 85 minutes** | Deep occasional audit sweeps. |
+
+### Parallel Multi-Worker Sandboxing (`--workers N`)
+
+DeployProof includes a built-in multi-process execution engine (`ProcessPoolExecutor`) for parallel mutation testing. You can supply `--workers <N>` to both diff-scoped checks and full-repo audits:
+
+```bash
+# Parallelize a large uncommitted diff across 8 worker processes
+deployproof check --workers 8
+
+# Full repository audit distributed across 8 worker processes
+deployproof check --full-repo --workers 8
+```
+
+#### How Parallel Sandboxing Works:
+1. **Snapshot Creation**: DeployProof takes an initial atomic snapshot of your project into a clean temporary directory.
+2. **PID-Keyed Sandboxes**: Each worker process receives its own dedicated filesystem sandbox (`worker_<PID>`), with an independent `pytest` cache (`--override-ini=cache_dir=...`) and separate temporary directory (`--basetemp=...`).
+3. **Zero Mutation Leaks**: Mutants are generated and executed inside individual worker sandboxes in parallel. The working tree is untouched, and signal handlers (`SIGINT`, `SIGTERM`, `SIGBREAK`) ensure sandboxes are cleanly purged upon completion or interruption.
+
+#### Advantages & When to Use:
+* **Large Diff / Full Repo Speedup**: Near-linear execution scaling across CPU cores for batches with 50+ mutants, cutting 30-minute sweeps down to 5–8 minutes.
+* **Process & Cache Isolation**: Eliminates cross-test state leakage, shared database locking, and `.pytest_cache` collisions between concurrent workers.
+
+#### Trade-offs & When NOT to Use:
+* **Small Daily Diffs (1–3 files)**: Do NOT use `--workers` for small 2-line edits. Spawning isolated sandboxes and copying file trees incurs ~1–2 seconds of snapshot overhead. Sequential in-place mutation executes in **2–5 seconds** with zero snapshot overhead.
+* **Disk Space & I/O Overhead**: Running $N$ workers copies the repository snapshot $N$ times into temporary storage ($N \times \text{repo size}$ in `tempfile.gettempdir()`). On disk-constrained environments, use fewer workers (e.g. `--workers 2` or `--workers 4`).
+* **Subprocess / Port Collisions**: If your test suite binds to fixed network ports (e.g. localhost:8080) without dynamic port selection, parallel workers running tests concurrently may trigger port conflicts. Use isolated ports or run sequentially in such environments.
 
 Output includes a section for each check — symlink scan, secrets scan, dependency scan, mock detection, control flow analysis, and mutation score — with a pass/fail line at the bottom. 
 
@@ -161,7 +213,7 @@ deployproof check --json
 
 ```json
 {
-  "version": "0.2.2",
+  "version": "1.0.0",
   "status": "passed",
   "summary": {
     "target_files_count": 1,
@@ -242,9 +294,9 @@ deployproof check --json
 - **Control Flow and Error Handling** — AST-based detector for bare `except:` without re-raise, silently swallowed broad exceptions (`except Exception:` that only `pass` or log/print without re-raising or returning error indicators), and dead/unreachable code following unconditional `return`, `raise`, `break`, or `continue`, with an optional `--strict-error-handling` hard gate.
 
 ## What This Doesn't Do
-
+ 
 - **Test-only diffs are not yet caught.** If a diff modifies or weakens assertions in a test file without changing the corresponding source file, DeployProof currently sees zero modified source lines and passes with 0 mutants evaluated. This is a known gap — see [INVESTIGATION_blastradius.md](INVESTIGATION_blastradius.md) for the reverse-mapping approach being evaluated to close it. Until this lands, DeployProof does not protect against test suites being weakened directly.
-- **Not a full-repo audit.** Checks are scoped to files changed in the current session (git diff). Files you haven't touched are not re-evaluated.
+- **Diff-scoping vs Full Audits:** Standard `deployproof check` is intentionally scoped strictly to files modified in the active git diff (for 2–5s speed). To audit every file in the entire repository, explicitly pass the `--full-repo` flag.
 - **Python only.** Mutation testing and import extraction currently support Python files only. Other languages are not scanned.
 - **No auto-fix.** DeployProof reports findings; it does not modify your code, rewrite imports, or suggest patches.
 - **No IDE plugin yet.** There is no VS Code extension or JetBrains plugin. The CLI is the interface. IDE integration is on the roadmap.
@@ -261,8 +313,8 @@ Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS cr
 
 ## Status & Roadmap
 
-- **Current (v0.2.2):** Diff-scoped AST mutation testing (with recursive `test/`/`tests/` discovery, AST column-offset snippet reconstruction, and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner (including unquoted .env values and prefix validation), GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, 94 unit tests, machine-readable `--json` output, and Tier 2 CI verification via GitHub Actions (mutmut).
-- **Next:** Multi-language mutation support and expanded ecosystem rule packs.
+- **Current (v1.0.0):** Diff-scoped AST mutation testing (with recursive discovery and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), **Full Repository Audit Mode (`--full-repo`)** with isolated parallel multi-worker sandboxes and AST import-graph test discovery, baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner, GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, **111 unit tests**, live unbuffered progress streaming, and machine-readable `--json` output.
+- **Next:** Reverse test-to-source dependency mapping (see `FUTURE_SCOPE.md`), SARIF 2.1.0 PR annotations, and multi-language mutation rule packs.
 
 ## Contributing
 
@@ -275,3 +327,4 @@ MIT. See [LICENSE](LICENSE).
 ---
 
 *Created by [SVS Praveen](https://github.com/SVSPraveen) · [Portfolio](https://svspraveen.vercel.app/) · [LinkedIn](https://www.linkedin.com/in/svs-praveen-s/)*
+

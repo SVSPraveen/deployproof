@@ -2,8 +2,8 @@
 
 Core rule: nothing in Stage N+1 starts until Stage N has real evidence behind it. No stage is time-boxed - it ends when its exit criteria are actually met, however long that takes.
 
-## Stage 0 — Current State (as of this launch)
-v0.1.9, Python-only, deterministic verification (mutation testing, secrets, dependency/slopsquatting, control-flow, symlink scanning). Six real bugs found and fixed across two independent test passes. Zero external users. Zero external contributors. Zero public posts.
+## Stage 0 — Current State (as of v1.0.0 launch)
+v1.0.0, Python-first, deterministic verification (diff-scoped mutation testing, secrets scanning, PyPI slopsquatting detection, control-flow checks, symlink sandbox-escape detection, and multi-worker full-repo audits). Verified against major open-source codebases (`click`, `requests`, `colorama`). Zero external users. Zero external contributors. Zero public posts.
 
 ## Stage 1 — Launch Week
 Actions: publish the proof artifact (terminal recording showing a real bug DeployProof catches that pytest misses), post to Hacker News and r/Python using the durable "deterministic verification" positioning, not an AI-hype-only framing.
@@ -14,9 +14,9 @@ Rule: do not build new features from imagination during this stage, even if exci
 Exit criteria to Stage 3: the SAME request or pain point shows up from 3+ independent real users - that's the signal for what to build next, not before.
 
 ## Stage 3 — First External Contributor
-Prerequisite (prepare before Stage 1, not after): add a lightweight CONTRIBUTING.md and a SECURITY.md (currently missing - notably ironic for a security tool) so the project is ready when someone shows up wanting to contribute.
-This stage is the actual "legendary" hinge - not stars, the first time someone who isn't the author meaningfully contributes.
-Exit criteria to Stage 4: first real external PR merged, or sustained real engagement from more than one outside person.
+Prerequisite: `CONTRIBUTING.md` and `SECURITY.md` are in place so the project is welcoming and ready for external open-source contributors.
+This stage represents genuine external validation — when a developer who is not the author meaningfully contributes to the codebase.
+Exit criteria to Stage 4: first external PR merged, or sustained engagement from multiple outside developers.
 
 ## Stage 3.5 — Enterprise Readiness Signals
 - Baseline-first state management for secrets scanning (`.deployproof-baseline` file, delta-only enforcement on legacy repos) — Trigger: someone reports DeployProof being unusable on a large legacy codebase due to historical findings.

@@ -38,3 +38,15 @@ Confirmed via research: MIT stays. AGPL was briefly considered earlier for anti-
 
 ## Bus-Factor / Governance (Stage 5, unchanged trigger)
 Confirmed via research: OpenSSF Scorecard automatically penalizes solo-maintainer projects on three specific checks (Maintained, Contributors, Code-Review), and these scores feed real automated procurement blocks at large companies. Mitigation options, in order of commitment required: (1) list a designated backup maintainer, (2) pursue foundation/fiscal hosting (PSF, Software Freedom Conservancy), (3) an enterprise retainer model (precedent: Filippo Valsorda / Go cryptography). None of these are worth pursuing until there's real inbound enterprise interest - trigger unchanged from existing Stage 5 entry.
+
+---
+
+## Full-Repo Mode Runtime (Resolved, Not a Bug)
+
+Confirmed via research: there is no safe technique to further speed up mutation testing on files whose test coverage falls back to large, slow shared test files (e.g. `auth.py`/`adapters.py` in `requests`, falling back to `test_requests.py`). Three real technical barriers prevent it: (1) `sys.setprofile`-based call-graph tracing would add 10x-50x runtime overhead, defeating the purpose; (2) static call-graph analysis is fundamentally unsound in Python due to dynamic dispatch, decorators, and monkeypatching; (3) even dynamic coverage contexts cannot guarantee correctness on transitively-covered code — narrowing the test set risks silently excluding the one test that would have caught a real mutation, corrupting the mutation score.
+
+Decision: `--full-repo` mode's current behavior (fall back to full test file when direct attribution is ambiguous) is correct and final. ~65-75 minutes for a full mutation sweep on a heavy library like `requests` is an honest cost, not a bug. This is explicitly NOT something to keep optimizing — doing so would trade correctness for speed, which contradicts DeployProof's core value proposition.
+
+The fast path (diff-scoped `deployproof check`, 2-5 seconds) is unaffected by any of this and remains the primary, marketed use case. `--full-repo` is correctly positioned as an occasional, thorough audit mode, not a fast operation.
+
+The sandbox snapshot isolation on Windows is hardened via Win32 PID liveness checking (`kernel32.OpenProcess`/`GetExitCodeProcess`) before snapshot cleanup, eliminating cross-process worker race conditions.
