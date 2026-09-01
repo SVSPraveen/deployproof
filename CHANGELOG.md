@@ -5,6 +5,15 @@ All notable changes to DeployProof will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-01
+
+### Fixed
+- **Clean CI Baseline Runner Fallback**: Proactively inspect module availability with `importlib.util.find_spec("coverage")` before invoking coverage runners. If `coverage` is absent (such as in minimal CI/CD test matrices) or fails at startup, DeployProof directly and cleanly falls back to standard `pytest`, preventing false `no_tests_ran` collection outcomes.
+- **Optional Dev Dependencies**: Added `coverage>=7.0.0` to `[project.optional-dependencies] dev` in `pyproject.toml` so automated test suites exercise coverage-guided test selection during CI runs.
+
+### Added
+- **Hardware & Memory Sizing Architecture**: Added comprehensive RAM requirements, sizing formulas, and an explicit **Diff Scoped vs Full Repo Memory Comparison** table documenting process RSS, page cache footprints, and multicore scaling guidance for 8 GB, 16 GB, and 32 GB+ workstations.
+
 ## [1.0.0] - 2026-09-01
 
 ### Added

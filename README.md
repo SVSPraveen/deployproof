@@ -119,7 +119,17 @@ Total Memory Required ≈ Base OS Overhead (~2 GB) + [ N_workers × (Worker Proc
 | **16 GB** | **`--workers 8` to `--workers 16`** | **~1.6 GB – 3.2 GB** | **Abundant (~12.8 GB free)** | **Full CPU core saturation; rapid multi-file diffs & full-repo sweeps.** |
 | **32 GB+** | `--workers 16` to `--workers 32` | ~3.5 GB – 6.5 GB | Enterprise headroom | Heavy monorepos, multi-thousand mutant CI sweeps. |
 
-##### 4. Minimum vs Recommended System Requirements:
+##### 4. Diff Scoped vs Full Repo Memory Comparison:
+
+| Metric | Git Diff (`deployproof check --workers 8`) | Full Repo (`deployproof check --full-repo --workers 8`) | Technical Rationale |
+| :--- | :--- | :--- | :--- |
+| **Concurrent OS Processes** | 8 worker processes | 8 worker processes | **Identical** — `ProcessPoolExecutor` only executes $N$ workers concurrently. |
+| **Worker Process RSS** | ~80 MB – 120 MB per process | ~120 MB – 180 MB per process | **Slightly higher** — Full repo sweeps import broader test suites and transitive frameworks into Python's `sys.modules`. |
+| **Sandbox Snapshot Cache** | ~15 MB per sandbox | ~30 MB – 60 MB per sandbox | **Higher** — Full repo snapshots clone all tracked repo files into temporary directories. |
+| **Total Memory with 8 Workers** | **~1.0 GB – 1.4 GB** | **~1.6 GB – 2.2 GB** | Modest increase; easily accommodated by standard 8 GB/16 GB machines. |
+| **Total Memory with 16 Workers** | **~1.8 GB – 2.5 GB** | **~3.0 GB – 3.8 GB** | Complete 16-core saturation while leaving 12+ GB RAM free on 16 GB systems. |
+
+##### 5. Minimum vs Recommended System Requirements:
 * **Absolute Minimum System RAM**: **2 GB** (for default sequential diff-scoped `deployproof check`).
 * **Minimum System RAM for Multi-Worker Mode (`--workers 4`)**: **4 GB**.
 * **Recommended System RAM for Max-Throughput Parallel Mode (`--workers 8` or `16`)**: **16 GB** (provides sufficient headroom to keep 8 to 16 Python subprocesses and their entire sandboxes resident in physical memory).
