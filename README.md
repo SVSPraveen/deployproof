@@ -71,7 +71,11 @@ deployproof check --full-repo --workers 8
 ```
 
 #### Real-World Timing Expectations:
-| Scan Mode | Target Scope | Typical Duration | Intended Use Case |
+
+> [!NOTE]
+> **Estimated Timings Disclaimer**: The durations below are empirical estimates based on benchmark runs across various open-source projects (such as `requests`, `click`, and `colorama`). Actual execution time may be **higher or lower** depending on your specific test suite execution speed (e.g., pure unit tests vs. heavy integration/database tests), test runner timeout settings (`--timeout`), hardware profile (CPU core clock speed, available RAM), and codebase complexity.
+
+| Scan Mode | Target Scope | Estimated Duration* | Intended Use Case |
 | :--- | :--- | :--- | :--- |
 | **`deployproof check`** | Git Diff (1–3 modified files) | **2 – 5 seconds** | Local pre-commit, active AI IDE coding loops, pre-push sanity checks. |
 | **`deployproof check --workers 8`** | Large Multi-File Diff (100+ mutants) | **1 – 3 minutes** | Large feature branch reviews, refactors. |
