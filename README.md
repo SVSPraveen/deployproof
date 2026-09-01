@@ -4,7 +4,7 @@
   <img src="assets/deployproof-hero.jpg" alt="DeployProof Hero Banner" width="100%" />
 </p>
 
-> Deterministic pre-push verification for AI-assisted codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense.
+> Deterministic pre-push quality & security gate for modern Python codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense. Built for human engineering teams and AI-assisted workflows alike.
 
 [![PyPI version](https://img.shields.io/badge/pypi-v1.1.0-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
@@ -17,7 +17,15 @@
 
 ## Why This Exists
 
-AI-assisted development introduces subtle failure modes that standard linters and coverage tools miss: test suites with high line coverage but near-zero mutation scores, hardcoded credentials generated in passing, symlinks that deceive approval prompts into escaping the repository sandbox, silently swallowed exceptions, and package names hallucinated by LLMs that don't exist on PyPI. DeployProof catches these at the pre-push stage, before they reach CI or production.
+Modern software development — whether crafted by human engineering teams or generated through AI coding assistants — introduces subtle failure modes that standard linters and line-coverage metrics completely miss:
+
+* **Deceptive Test Suites**: Test suites boasting 90%+ line coverage that never assert true correctness, masking near-zero mutation scores.
+* **Accidental Credential Exposure**: Hardcoded API keys, bearer tokens, or service credentials generated in passing or pasted into tests.
+* **Sandbox Escape Risks**: Symlinks that deceive tool approval prompts into breaking outside the repository sandbox.
+* **Silently Swallowed Exceptions**: Blanket `except Exception: pass` anti-patterns that hide critical runtime bugs.
+* **Dependency Hallucinations & Slopsquatting**: Package names invented by LLMs or mistyped dependencies that don't exist on public PyPI.
+
+DeployProof serves as an uncompromising, deterministic pre-push gate that validates code quality, test integrity, and security locally before any commit reaches CI or production.
 
 > **Privacy & Security Guarantee**: DeployProof runs 100% locally on your machine. It makes zero outbound network calls, except for querying the official PyPI registry (JSON API) to verify that newly introduced dependencies exist and are not hallucinated. DeployProof sends no source code, telemetry, test results, or secret findings to any external server.
 

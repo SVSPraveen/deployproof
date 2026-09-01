@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "deployproof"
 version = "1.1.0"
-description = "A deterministic AI-code deployability checker that catches what coverage misses."
+description = "Deterministic pre-push quality & security verification gate for Python codebases that catches what coverage misses."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -13,14 +13,16 @@ authors = [
     { name = "SVS Praveen", email = "svspraveens@gmail.com" }
 ]
 keywords = [
-    "ai-code",
+    "code-quality",
     "mutation-testing",
     "security-scanner",
-    "slopsquatting",
-    "ghostapproval",
+    "developer-tools",
     "pre-push-verification",
+    "python-testing",
     "ast-analysis",
     "dependency-security",
+    "ai-code",
+    "slopsquatting",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
