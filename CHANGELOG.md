@@ -5,6 +5,17 @@ All notable changes to DeployProof will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-09-01
+
+### Changed
+- **Universal Codebase Positioning**: Elevated package positioning and metadata to support modern Python codebases generally (built for human engineering teams and AI-assisted workflows alike).
+- **Expanded PyPI Metadata**: Added `code-quality`, `developer-tools`, and `python-testing` keywords to `pyproject.toml`.
+- **Recommended Installation**: Promoted `pipx install deployproof` as the primary installation method for isolated global CLI access.
+
+### Documentation
+- **Estimated Timings Disclaimer**: Added explicit disclaimer in `README.md` and architectural specifications noting that execution durations are empirical estimates and vary based on test suite speed, hardware clock/RAM, and codebase size.
+- **Authentic Terminal Visuals**: Updated documentation assets with authentic Windows Terminal / PowerShell 7 screenshots demonstrating real execution, four core workflow commands, and actionable findings reports.
+
 ## [1.1.0] - 2026-09-01
 
 ### Added

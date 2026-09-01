@@ -1,2 +1,2 @@
-"""DeployProof - Deterministic AI-Code Deployability Checker."""
-__version__ = "1.1.0"
+"""DeployProof: Deterministic quality & security gate for modern Python codebases."""
+__version__ = "1.1.1"
