@@ -20,10 +20,14 @@ AI-assisted development introduces subtle failure modes that standard linters an
 ## Install
 
 ```bash
+# Recommended — installs into an isolated environment, exposes the CLI globally
+pipx install deployproof
+
+# Or via pip into your current environment
 pip install deployproof
 ```
 
-Requires Python 3.10+.
+Requires Python 3.10+. If you don't have `pipx`, install it with `pip install pipx` then run `pipx ensurepath`.
 
 ## How to Use DeployProof
 
