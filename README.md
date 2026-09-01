@@ -59,9 +59,12 @@ deployproof check --full-repo --workers 8
 | :--- | :--- | :--- | :--- |
 | **`deployproof check`** | Git Diff (1–3 modified files) | **2 – 5 seconds** | Local pre-commit, active AI IDE coding loops, pre-push sanity checks. |
 | **`deployproof check --workers 8`** | Large Multi-File Diff (100+ mutants) | **1 – 3 minutes** | Large feature branch reviews, refactors. |
-| **`deployproof check --full-repo`** | Small Repo (< 100 mutants) | **30s – 2 minutes** | Initial repo onboarding, weekly audits. |
-| **`deployproof check --full-repo`** | Medium Repo (200–500 mutants) | **5 – 15 minutes** | Release validation, scheduled CI jobs. |
-| **`deployproof check --full-repo`** | Heavy / Network Lib (`requests`, 800 mutants) | **60 – 85 minutes** | Deep occasional audit sweeps. |
+| **`deployproof check --full-repo`** | Small Repo (< 100 mutants, sequential) | **30s – 2 minutes** | Single-core / lightweight auditing. |
+| **`deployproof check --full-repo --workers 8`** | Small Repo (< 100 mutants, 8 workers) | **15 – 30 seconds** | Rapid full baseline verification. |
+| **`deployproof check --full-repo`** | Medium Repo (200–500 mutants, sequential) | **15 – 35 minutes** | Unconstrained single-thread verification. |
+| **`deployproof check --full-repo --workers 8`** | Medium Repo (200–500 mutants, 8 workers) | **3 – 7 minutes** | Release validation, pre-tag quality gates. |
+| **`deployproof check --full-repo`** | Heavy / Network Lib (`requests`, 800 mutants) | **60 – 85 minutes** | Deep overnight / weekly sweep. |
+| **`deployproof check --full-repo --workers 8`** | Heavy / Network Lib (`requests`, 800 mutants) | **12 – 18 minutes** | High-throughput multi-core CI release builds. |
 
 ### Parallel Multi-Worker Sandboxing (`--workers N`)
 
@@ -88,6 +91,11 @@ deployproof check --full-repo --workers 8
 * **Small Daily Diffs (1–3 files)**: Do NOT use `--workers` for small 2-line edits. Spawning isolated sandboxes and copying file trees incurs ~1–2 seconds of snapshot overhead. Sequential in-place mutation executes in **2–5 seconds** with zero snapshot overhead.
 * **Disk Space & I/O Overhead**: Running $N$ workers copies the repository snapshot $N$ times into temporary storage ($N \times \text{repo size}$ in `tempfile.gettempdir()`). On disk-constrained environments, use fewer workers (e.g. `--workers 2` or `--workers 4`).
 * **Subprocess / Port Collisions**: If your test suite binds to fixed network ports (e.g. localhost:8080) without dynamic port selection, parallel workers running tests concurrently may trigger port conflicts. Use isolated ports or run sequentially in such environments.
+
+#### Hardware & Throughput Optimization (RAM & CPU Tuning):
+* **Memory Headroom (e.g. 16 GB RAM)**: Each worker process and sandbox snapshot consumes approximately 50 MB to 150 MB of RAM (depending on your test suite imports and fixtures). With **16 GB RAM**, memory is never your bottleneck — you can comfortably scale `--workers` up to match your total physical or logical CPU cores (e.g., `--workers 8`, `--workers 12`, or `--workers 16`) without risking paging or memory pressure.
+* **CPU Core Saturation**: Test runs are primarily CPU-bound. For maximum throughput, set `--workers` to `min(os.cpu_count(), 16)`. DeployProof's internal scheduler automatically assigns mutants across the pool in real time, keeping all CPU cores saturated until the sweep finishes.
+* **Fast Disk / In-Memory Drive**: Because sandboxes are written to your system's temp directory, fast NVMe drives or placing the temporary directory on an in-memory drive (`tmpfs` on Linux / RAM disk on Windows via `TMP` or `TEMP` environment variables) eliminates snapshot I/O latency entirely.
 
 Output includes a section for each check — symlink scan, secrets scan, dependency scan, mock detection, control flow analysis, and mutation score — with a pass/fail line at the bottom. 
 

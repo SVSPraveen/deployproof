@@ -1493,25 +1493,39 @@ def run_mutation_tests_parallel(
                 t0 = time.time()
                 baseline_timeout = _calculate_baseline_timeout(pytest_args, snapshot_dir, test_runner_timeout)
                 
-                # Attempt coverage-guided baseline run
-                pytest_cmd = [
-                    sys.executable,
-                    "-B",
-                    "-m",
-                    "coverage",
-                    "run",
-                    "-p",
-                    f"--source={cov_source}",
-                    "-m",
-                    "pytest",
-                    "-q",
-                    "--tb=short",
-                    "-p",
-                    "_deployproof_cov_plugin",
-                    "-o",
-                    f"cache_dir={snapshot_cache}",
-                    f"--basetemp={snapshot_tmp}",
-                ] + pytest_args
+                # Attempt coverage-guided baseline run if coverage is available
+                has_coverage = importlib.util.find_spec("coverage") is not None
+                if has_coverage:
+                    pytest_cmd = [
+                        sys.executable,
+                        "-B",
+                        "-m",
+                        "coverage",
+                        "run",
+                        "-p",
+                        f"--source={cov_source}",
+                        "-m",
+                        "pytest",
+                        "-q",
+                        "--tb=short",
+                        "-p",
+                        "_deployproof_cov_plugin",
+                        "-o",
+                        f"cache_dir={snapshot_cache}",
+                        f"--basetemp={snapshot_tmp}",
+                    ] + pytest_args
+                else:
+                    pytest_cmd = [
+                        sys.executable,
+                        "-B",
+                        "-m",
+                        "pytest",
+                        "-q",
+                        "--tb=short",
+                        "-o",
+                        f"cache_dir={snapshot_cache}",
+                        f"--basetemp={snapshot_tmp}",
+                    ] + pytest_args
 
                 try:
                     baseline_res = subprocess.run(
@@ -1525,7 +1539,11 @@ def run_mutation_tests_parallel(
                         timeout=baseline_timeout,
                     )
                     # If coverage run failed to execute, fallback to standard pytest
-                    if baseline_res.returncode not in (0, 1, 5) and ("coverage" in (baseline_res.stderr.lower() + baseline_res.stdout.lower())):
+                    if has_coverage and (
+                        "no module named coverage" in baseline_res.stderr.lower()
+                        or "coverage" in baseline_res.stderr.lower()
+                        or (baseline_res.returncode != 0 and parse_pytest_summary(baseline_res.stdout + "\n" + baseline_res.stderr)["no_tests_ran"])
+                    ):
                         fallback_cmd = [
                             sys.executable,
                             "-B",

@@ -99,9 +99,12 @@ Developer Finishes Coding Session / Pre-Push Trigger
 | :--- | :--- | :--- | :--- |
 | **`deployproof check`** | Git Diff (1–3 modified files) | **2 – 5 seconds** | Fast local pre-commit, active AI IDE loops, pre-push sanity checks. |
 | **`deployproof check --workers 8`** | Large Diff (100+ mutants) | **1 – 3 minutes** | Large feature branch reviews, wide refactors. |
-| **`deployproof check --full-repo`** | Small Repo (< 100 mutants) | **30s – 2 minutes** | Initial onboarding, weekly audits. |
-| **`deployproof check --full-repo`** | Medium Repo (200–500 mutants) | **5 – 15 minutes** | Release validation, scheduled CI jobs. |
-| **`deployproof check --full-repo`** | Heavy Lib (`requests`, 800 mutants) | **60 – 85 minutes** | Deep occasional sweeps on network-heavy test suites. |
+| **`deployproof check --full-repo`** | Small Repo (< 100 mutants, sequential) | **30s – 2 minutes** | Single-core / lightweight auditing. |
+| **`deployproof check --full-repo --workers 8`** | Small Repo (< 100 mutants, 8 workers) | **15 – 30 seconds** | Rapid full baseline verification. |
+| **`deployproof check --full-repo`** | Medium Repo (200–500 mutants, sequential) | **15 – 35 minutes** | Unconstrained single-thread verification. |
+| **`deployproof check --full-repo --workers 8`** | Medium Repo (200–500 mutants, 8 workers) | **3 – 7 minutes** | Release validation, pre-tag quality gates. |
+| **`deployproof check --full-repo`** | Heavy Lib (`requests`, 800 mutants, sequential) | **60 – 85 minutes** | Deep overnight / weekly sweep. |
+| **`deployproof check --full-repo --workers 8`** | Heavy Lib (`requests`, 800 mutants, 8 workers) | **12 – 18 minutes** | High-throughput multi-core CI release builds. |
 
 ---
 
