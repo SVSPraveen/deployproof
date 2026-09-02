@@ -136,3 +136,36 @@ def test_multiply():
     assert res.killed_mutants > 0
     assert res.mutation_score is not None
     assert res.mutation_score >= 50.0
+
+
+def test_schemata_mutated_line_accuracy(tmp_path: Path):
+    """Verify that every generated mutant has a distinct, accurate mutated_line != original_line."""
+    code_file = tmp_path / "sample.py"
+    code_file.write_text(
+        "def compute(x: float) -> float:\n"
+        "    if x > 10:\n"
+        "        return x * 2\n"
+        "    return 0.0\n",
+        encoding="utf-8",
+    )
+
+    _, mutants, _ = generate_schemata_for_file(code_file)
+    assert len(mutants) >= 3
+
+    # Check that mutated_line is never identical to original_line
+    for m in mutants:
+        assert m.original_line != "", f"Original line should not be empty for {m.mutant_id}"
+        assert m.mutated_line != m.original_line, (
+            f"Mutated line should differ from original for {m.description}. "
+            f"Got Orig='{m.original_line}', Mut='{m.mutated_line}'"
+        )
+
+    # Check specific mutations
+    op_mutants = [m for m in mutants if "operator '*'" in m.description]
+    assert len(op_mutants) >= 1
+    assert "return x / 2" in op_mutants[0].mutated_line
+
+    ret_mutants = [m for m in mutants if "return value with None" in m.description]
+    assert len(ret_mutants) >= 1
+    assert any(m.mutated_line == "return None" for m in ret_mutants)
+

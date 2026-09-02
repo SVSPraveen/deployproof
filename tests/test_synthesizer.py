@@ -244,3 +244,68 @@ def test_synthesize_class_method_and_async(tmp_path: Path):
     assert "obj = Order()" in t.test_code
     assert "await obj.process_payment(" in t.test_code
     ast.parse(t.test_code)
+
+
+def test_multiple_mutants_same_line_all_get_suggested_tests(tmp_path: Path):
+    """Verify that multiple surviving mutants on the same line all receive test suggestions in format_report."""
+    sample = tmp_path / "calc.py"
+    sample.write_text(
+        "def compute_discount(price: float, is_vip: bool) -> float:\n"
+        "    if is_vip:\n"
+        "        return price * 0.8\n"
+        "    return price\n",
+        encoding="utf-8",
+    )
+
+    m1 = Mutant(
+        mutant_id="calc.py:3:schemata_1",
+        file_path=sample,
+        line_number=3,
+        description="Replace binary operator '*' with '/'",
+        original_line="return price * 0.8",
+        mutated_line="return price / 0.8",
+        mutated_source="",
+        status="SURVIVED",
+    )
+    m2 = Mutant(
+        mutant_id="calc.py:3:schemata_2",
+        file_path=sample,
+        line_number=3,
+        description="Replace numeric constant '0.8' with '1.8'",
+        original_line="return price * 0.8",
+        mutated_line="return price * 1.8",
+        mutated_source="",
+        status="SURVIVED",
+    )
+    m3 = Mutant(
+        mutant_id="calc.py:3:schemata_3",
+        file_path=sample,
+        line_number=3,
+        description="Replace return value with None (statement mutation)",
+        original_line="return price * 0.8",
+        mutated_line="return None",
+        mutated_source="",
+        status="SURVIVED",
+    )
+
+    res = MutationResult(
+        total_mutants=3,
+        killed_mutants=0,
+        survived_mutants=[m1, m2, m3],
+        untested_files=[],
+        runner_errors=[],
+        skipped_constructs=[],
+        mutation_score=0.0,
+        duration_seconds=0.1,
+        files_tested=[sample],
+    )
+
+    tests = synthesize_tests_for_surviving_mutants([m1, m2, m3], repo_root=tmp_path)
+    # All 3 mutants should have synthesized tests without any being dropped
+    assert len(tests) == 3
+
+    report = format_report(res, [sample], repo_root=tmp_path)
+    # Each of the 3 mutants in the surviving mutants section must have a suggested test
+    count_suggestions = report.count("Suggested Pytest Test to Kill Mutant:")
+    assert count_suggestions == 3
+

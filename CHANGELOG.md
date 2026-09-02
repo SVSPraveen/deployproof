@@ -5,6 +5,15 @@ All notable changes to DeployProof will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.15] - 2026-09-03
+
+### Fixed
+- **Clean Source Restoration (`cli.py`)**: Completely restored `src/deployproof/cli.py` to clean hand-written source, purging all accidental in-memory mutation schemata artifacts (`_dp_m(...)`, `XX...XX` literals, and ternary switches) committed prior to v1.1.14.
+- **Unscanned Dependency JSON Crash**: Fixed `NameError: name 'rel_src' is not defined` when reporting unscanned dependencies in `format_json_report()`, aligning JSON reports with plain-text formatting.
+- **Accurate Mutated Line Reconstruction**: Propagated AST node column offsets (`col_offset`, `end_col_offset`) across binary operators, comparisons, unary expressions, calls, and boolean operations. Added statement-level return mutation reconstruction (`return <expr>` &rarr; `return None`) and exact token substitution so surviving mutant diffs accurately reflect code changes.
+- **Multi-Mutant Test Synthesis on Shared Lines**: Updated `synthesizer.py` to assign unique test names and prevent dropping subsequent mutants occurring on the same source line. Updated `reporter.py` with dual-map lookup (`mutant_id` + line fallback) so all surviving mutants render suggested pytest tests.
+- **Python 3.12+ f-String Schemata Compilation**: Added `visit_JoinedStr` to `MutationSchemataTransformer` to safely bypass placing `IfExp` nodes inside raw `JoinedStr.values` constant fragments, allowing all 18 repository modules to compile 6,374 schemata mutants without `ValueError` exceptions.
+
 ## [1.1.14] - 2026-09-02
 
 ### Added

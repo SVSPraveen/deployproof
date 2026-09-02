@@ -52,3 +52,22 @@ Decision: `--full-repo` mode's current behavior (fall back to full test file whe
 The fast path (diff-scoped `deployproof check`, 2-5 seconds) is unaffected by any of this and remains the primary, marketed use case. `--full-repo` is correctly positioned as an occasional, thorough audit mode, not a fast operation.
 
 The sandbox snapshot isolation on Windows is hardened via Win32 PID liveness checking (`kernel32.OpenProcess`/`GetExitCodeProcess`) before snapshot cleanup, eliminating cross-process worker race conditions.
+
+---
+
+## In-Process Persistent Test Worker Pool (Next Major Performance Lever)
+
+Status: Architectural Roadmap Backlog.
+
+**Benchmark Measurements & Analysis:**
+* Benchmark across 210 mutants: total duration 54.3s (~259ms per mutant).
+* Baseline `python -m pytest` process spawn & collection overhead: ~244ms per invocation.
+* Real mutation assertion test execution time: ~15ms per mutant.
+* **Finding:** 94% of the per-mutant execution cost is interpreter boot and pytest test collection tax, not the mutation assertion itself.
+
+**Architecture Opportunity:**
+* DeployProof's AST mutant schemata engine compiles all mutants into one AST gated by in-memory `_dp_m(switch_idx)` switches.
+* Currently, the test runner invokes `subprocess.run(..., env={'__DEPLOYPROOF_MUTANT__': switch})`, incurring the 244ms interpreter spawn tax per mutant.
+* **Next Architectural Evolution:** Implement a persistent worker daemon pool. Each worker process imports the target and test suite once into warm Python memory, then evaluates hundreds of mutants in-process by flipping the in-memory switch and executing test functions directly (with signal/timeout guards and sandbox isolation).
+* **Projected Impact:** Reduces per-mutant evaluation time from ~259ms down to ~15-20ms (an ~8-10x speedup across both diff-scoped runs and full-repo audits without requiring additional CPU cores).
+

@@ -1474,7 +1474,12 @@ def generate_mutants_for_file(file_path: Path, line_ranges: Optional[Set[int]] =
         end_col_offset = transformer.applied_info[5] if transformer.applied_info and len(transformer.applied_info) > 5 else None
         raw_line = lines[lineno - 1] if 0 <= lineno - 1 < len(lines) else ''
         orig_line = raw_line.strip()
-        if col_offset is not None and end_col_offset is not None and (0 <= col_offset <= end_col_offset <= len(raw_line)):
+        if desc.startswith("Replace return value with None"):
+            if "return" in orig_line:
+                mut_line = re.sub(r"\breturn\b\s+.*", "return None", orig_line)
+            else:
+                mut_line = "return None"
+        elif col_offset is not None and end_col_offset is not None and (0 <= col_offset <= end_col_offset <= len(raw_line)):
             span_text = raw_line[col_offset:end_col_offset]
             if old_val and span_text == old_val:
                 mut_line = (raw_line[:col_offset] + new_val + raw_line[end_col_offset:]).strip()
@@ -1486,11 +1491,15 @@ def generate_mutants_for_file(file_path: Path, line_ranges: Optional[Set[int]] =
                 if idx_in_line != -1:
                     mut_line = (raw_line[:idx_in_line] + new_val + raw_line[idx_in_line + len(old_val):]).strip()
                 else:
-                    mut_lines = mutated_source.splitlines()
-                    mut_line = mut_lines[lineno - 1].strip() if 0 <= lineno - 1 < len(mut_lines) else orig_line
+                    mut_line = orig_line
         else:
-            mut_lines = mutated_source.splitlines()
-            mut_line = mut_lines[lineno - 1].strip() if 0 <= lineno - 1 < len(mut_lines) else orig_line
+            mut_line = orig_line
+
+        if mut_line == orig_line and old_val and old_val in orig_line:
+            if old_val.isalpha():
+                mut_line = re.sub(r"\b" + re.escape(old_val) + r"\b", new_val, orig_line, count=1).strip()
+            else:
+                mut_line = orig_line.replace(old_val, new_val, 1).strip()
         mutant_id = f'{file_path.name}:{lineno}:mutant_{idx + 1}'
         mutants.append(Mutant(mutant_id=mutant_id, file_path=file_path, line_number=lineno, description=desc, original_line=orig_line, mutated_line=mut_line, mutated_source=mutated_source))
     return mutants
@@ -1541,6 +1550,24 @@ class MutationSchemataTransformer(ast.NodeTransformer):
             body=mutated_node,
             orelse=original_node,
         )
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> ast.AST:
+        # FormattedValue expressions inside f-strings can be mutated,
+        # but Constant fragments inside JoinedStr.values must not be wrapped in IfExp.
+        new_values = []
+        for val in node.values:
+            if isinstance(val, ast.FormattedValue):
+                new_values.append(
+                    ast.FormattedValue(
+                        value=self.visit(val.value),
+                        conversion=val.conversion,
+                        format_spec=self.visit(val.format_spec) if val.format_spec else None,
+                    )
+                )
+            else:
+                new_values.append(val)
+        node.values = new_values
+        return node
 
     def visit_Module(self, node: ast.Module) -> ast.AST:
         new_body = []
@@ -1607,9 +1634,11 @@ class MutationSchemataTransformer(ast.NodeTransformer):
         if not _is_none_constant(node.value):
             v_val = self.visit(node.value) if node.value is not None else ast.Constant(value=None)
             lineno = getattr(node, "lineno", 1)
+            col_offset = getattr(node, "col_offset", None)
+            end_col_offset = getattr(node, "end_col_offset", None)
             mut_val = ast.Constant(value=None)
             desc = "Replace return value with None (statement mutation)"
-            wrapped_val = self._wrap_ifexp(v_val, mut_val, lineno, desc, "return", "return None")
+            wrapped_val = self._wrap_ifexp(v_val, mut_val, lineno, desc, "return", "return None", col_offset, end_col_offset)
             return ast.Return(value=wrapped_val)
         return node
 
@@ -1619,10 +1648,12 @@ class MutationSchemataTransformer(ast.NodeTransformer):
         orig_compare = ast.Compare(left=v_left, ops=node.ops, comparators=v_comparators)
         if len(node.ops) == 1 and type(node.ops[0]) in COMPARE_MAP:
             lineno = getattr(node, "lineno", 1)
+            col_offset = getattr(node, "col_offset", None)
+            end_col_offset = getattr(node, "end_col_offset", None)
             mut_op_cls, old_op_str, new_op_str = COMPARE_MAP[type(node.ops[0])]
             mut_compare = ast.Compare(left=v_left, ops=[mut_op_cls()], comparators=v_comparators)
             desc = f"Replace comparison '{old_op_str}' with '{new_op_str}'"
-            return self._wrap_ifexp(orig_compare, mut_compare, lineno, desc, old_op_str, new_op_str)
+            return self._wrap_ifexp(orig_compare, mut_compare, lineno, desc, old_op_str, new_op_str, col_offset, end_col_offset)
         return orig_compare
 
     def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
@@ -1631,10 +1662,12 @@ class MutationSchemataTransformer(ast.NodeTransformer):
         orig_binop = ast.BinOp(left=v_left, op=node.op, right=v_right)
         if type(node.op) in BINOP_MAP and not is_algebraic_zero_identity(node):
             lineno = getattr(node, "lineno", 1)
+            col_offset = getattr(node, "col_offset", None)
+            end_col_offset = getattr(node, "end_col_offset", None)
             mut_op_cls, old_op_str, new_op_str = BINOP_MAP[type(node.op)]
             mut_binop = ast.BinOp(left=v_left, op=mut_op_cls(), right=v_right)
             desc = f"Replace binary operator '{old_op_str}' with '{new_op_str}'"
-            return self._wrap_ifexp(orig_binop, mut_binop, lineno, desc, old_op_str, new_op_str)
+            return self._wrap_ifexp(orig_binop, mut_binop, lineno, desc, old_op_str, new_op_str, col_offset, end_col_offset)
         return orig_binop
 
     def visit_BoolOp(self, node: ast.BoolOp) -> ast.AST:
@@ -1642,24 +1675,28 @@ class MutationSchemataTransformer(ast.NodeTransformer):
         orig_boolop = ast.BoolOp(op=node.op, values=v_values)
         if type(node.op) in BOOLOP_MAP:
             lineno = getattr(node, "lineno", 1)
+            col_offset = getattr(node, "col_offset", None)
+            end_col_offset = getattr(node, "end_col_offset", None)
             mut_op_cls, old_op_str, new_op_str = BOOLOP_MAP[type(node.op)]
             mut_boolop = ast.BoolOp(op=mut_op_cls(), values=v_values)
             desc = f"Replace logical operator '{old_op_str}' with '{new_op_str}'"
-            return self._wrap_ifexp(orig_boolop, mut_boolop, lineno, desc, old_op_str, new_op_str)
+            return self._wrap_ifexp(orig_boolop, mut_boolop, lineno, desc, old_op_str, new_op_str, col_offset, end_col_offset)
         return orig_boolop
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
         v_operand = self.visit(node.operand)
         lineno = getattr(node, "lineno", 1)
+        col_offset = getattr(node, "col_offset", None)
+        end_col_offset = getattr(node, "end_col_offset", None)
         orig_unary = ast.UnaryOp(op=node.op, operand=v_operand)
         if isinstance(node.op, ast.Not):
             desc = "Invert boolean negation (remove 'not')"
-            return self._wrap_ifexp(orig_unary, v_operand, lineno, desc, "not", "")
+            return self._wrap_ifexp(orig_unary, v_operand, lineno, desc, "not", "", col_offset, end_col_offset)
         elif type(node.op) in UNARYOP_MAP:
             mut_op_cls, old_op_str, new_op_str = UNARYOP_MAP[type(node.op)]
             mut_unary = ast.UnaryOp(op=mut_op_cls(), operand=v_operand)
             desc = f"Replace unary operator '{old_op_str}' with '{new_op_str}'"
-            return self._wrap_ifexp(orig_unary, mut_unary, lineno, desc, old_op_str, new_op_str)
+            return self._wrap_ifexp(orig_unary, mut_unary, lineno, desc, old_op_str, new_op_str, col_offset, end_col_offset)
         return orig_unary
 
     def visit_Constant(self, node: ast.Constant) -> ast.AST:
@@ -1690,6 +1727,8 @@ class MutationSchemataTransformer(ast.NodeTransformer):
         if is_log_or_print_call(node):
             return node
         lineno = getattr(node, "lineno", 1)
+        col_offset = getattr(node, "col_offset", None)
+        end_col_offset = getattr(node, "end_col_offset", None)
         v_func = self.visit(node.func)
         v_args = [self.visit(a) for a in node.args]
         v_kws = [ast.keyword(arg=kw.arg, value=self.visit(kw.value)) for kw in node.keywords]
@@ -1701,15 +1740,15 @@ class MutationSchemataTransformer(ast.NodeTransformer):
             mut_func = ast.Attribute(value=v_func.value if isinstance(v_func, ast.Attribute) else self.visit(node.func.value), attr=new_attr, ctx=node.func.ctx)
             mut_call = ast.Call(func=mut_func, args=v_args, keywords=v_kws)
             desc = f"Swap string method '{old_attr}' with '{new_attr}'"
-            return self._wrap_ifexp(orig_call, mut_call, lineno, desc, old_attr, new_attr)
+            return self._wrap_ifexp(orig_call, mut_call, lineno, desc, old_attr, new_attr, col_offset, end_col_offset)
         elif isinstance(node.func, ast.Attribute) and node.func.attr == "get" and len(node.args) == 2 and not _is_none_constant(node.args[1]):
             mut_call = ast.Call(func=v_func, args=[v_args[0], ast.Constant(value=None)], keywords=[])
             desc = "Remove dictionary .get() default fallback (replace with None)"
-            return self._wrap_ifexp(orig_call, mut_call, lineno, desc, "default", "None")
+            return self._wrap_ifexp(orig_call, mut_call, lineno, desc, "default", "None", col_offset, end_col_offset)
         elif len(node.args) == 2 and not _is_special_builtin_call(node) and not is_range_zero_start(node):
             mut_call = ast.Call(func=v_func, args=[v_args[1], v_args[0]], keywords=v_kws)
             desc = "Swap positional arguments in function call (arg1 <-> arg2)"
-            return self._wrap_ifexp(orig_call, mut_call, lineno, desc, "arg1, arg2", "arg2, arg1")
+            return self._wrap_ifexp(orig_call, mut_call, lineno, desc, "arg1, arg2", "arg2, arg1", col_offset, end_col_offset)
         return orig_call
 
 
@@ -1777,7 +1816,12 @@ def _dp_m(mid: int) -> bool:
     for mid, lineno, desc, old_val, new_val, col_offset, end_col_offset in transformer.mutant_records:
         raw_line = lines[lineno - 1] if 0 <= lineno - 1 < len(lines) else ""
         orig_line = raw_line.strip()
-        if col_offset is not None and end_col_offset is not None and (0 <= col_offset <= end_col_offset <= len(raw_line)):
+        if desc.startswith("Replace return value with None"):
+            if "return" in orig_line:
+                mut_line = re.sub(r"\breturn\b\s+.*", "return None", orig_line)
+            else:
+                mut_line = "return None"
+        elif col_offset is not None and end_col_offset is not None and (0 <= col_offset <= end_col_offset <= len(raw_line)):
             span_text = raw_line[col_offset:end_col_offset]
             if old_val and span_text == old_val:
                 mut_line = (raw_line[:col_offset] + new_val + raw_line[end_col_offset:]).strip()
@@ -1785,9 +1829,19 @@ def _dp_m(mid: int) -> bool:
                 mut_span = span_text.replace(old_val, new_val, 1)
                 mut_line = (raw_line[:col_offset] + mut_span + raw_line[end_col_offset:]).strip()
             else:
-                mut_line = orig_line
+                idx_in_line = raw_line.find(old_val, col_offset)
+                if idx_in_line != -1:
+                    mut_line = (raw_line[:idx_in_line] + new_val + raw_line[idx_in_line + len(old_val):]).strip()
+                else:
+                    mut_line = orig_line
         else:
             mut_line = orig_line
+
+        if mut_line == orig_line and old_val and old_val in orig_line:
+            if old_val.isalpha():
+                mut_line = re.sub(r"\b" + re.escape(old_val) + r"\b", new_val, orig_line, count=1).strip()
+            else:
+                mut_line = orig_line.replace(old_val, new_val, 1).strip()
 
         mutant_id = f"{file_path.name}:{lineno}:schemata_{mid}"
         m = Mutant(

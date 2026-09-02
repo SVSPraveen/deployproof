@@ -1,5 +1,4 @@
-"""Tests for Dependency & Slopsquatting scanner CLI wiring and report formatting."""
-
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -10,7 +9,7 @@ from deployproof.dependencies import (
     ExtractedDependency,
 )
 from deployproof.mutator import MutationResult
-from deployproof.reporter import format_report
+from deployproof.reporter import format_report, format_json_report
 from deployproof.secrets import SecretsScanResult
 from deployproof.symlinks import SymlinkScanResult
 
@@ -313,6 +312,96 @@ def test_cli_dynamic_import_non_literal_variable_warning(tmp_path: Path, capsys,
     assert "Dynamic import with non-literal name - cannot verify statically" in captured.out
     # Non-literal dynamic import alone does not fail exit code
     assert exit_code == 0
+
+
+def test_format_json_report_with_unscanned_dependency_source(tmp_path: Path):
+    """Verify format_json_report properly handles UNSCANNED dependency findings without crashing on undefined variables."""
+    req_file = tmp_path / "requirements.txt"
+    dep_summary = DependencyScanSummary(
+        total_scanned=2,
+        high_risk_count=0,
+        medium_risk_count=0,
+        ok_count=1,
+        unknown_count=0,
+        findings=[
+            DependencyCheckResult(
+                package_name="-r base.txt",
+                import_name="-r base.txt",
+                source_file=req_file,
+                lineno=2,
+                source_type="requirements.txt",
+                status="UNSCANNED",
+                age_days=None,
+                first_release_date=None,
+                details="External requirements file include (-r) - seen, not checked",
+            ),
+        ],
+        duration_seconds=0.1,
+        unscanned_count=1,
+    )
+
+    mut_res = MutationResult(
+        total_mutants=0,
+        killed_mutants=0,
+        survived_mutants=[],
+        untested_files=[],
+        runner_errors=[],
+        skipped_constructs=[],
+        mutation_score=100.0,
+        duration_seconds=0.1,
+        files_tested=[],
+    )
+
+    json_report_str = format_json_report(
+        result=mut_res,
+        target_files=[],
+        dependency_result=dep_summary,
+        repo_root=tmp_path,
+    )
+
+    data = json.loads(json_report_str)
+    assert data["summary"]["dependency_findings"]["unscanned"] == 1
+    unscanned_list = data["dependencies"]["unscanned_sources"]
+    assert len(unscanned_list) == 1
+    assert unscanned_list[0]["source"] == "-r base.txt"
+    assert unscanned_list[0]["file"] == "requirements.txt"
+    assert unscanned_list[0]["line"] == 2
+    assert unscanned_list[0]["source_type"] == "requirements.txt"
+    assert unscanned_list[0]["reason"] == "External requirements file include (-r) - seen, not checked"
+
+
+def test_cli_dynamic_import_json_output_does_not_crash(tmp_path: Path, capsys, monkeypatch):
+    """Verify CLI --json runs and outputs valid JSON when dynamic imports or unscanned sources exist."""
+    monkeypatch.chdir(tmp_path)
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "Tester"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+
+    app_py = tmp_path / "app.py"
+    app_py.write_text(
+        "import importlib\n"
+        "def load_plugin(plugin_name):\n"
+        "    return importlib.import_module(plugin_name)\n",
+        encoding="utf-8",
+    )
+
+    test_py = tmp_path / "test_app.py"
+    test_py.write_text(
+        "from app import load_plugin\n"
+        "def test_plugin():\n"
+        "    assert load_plugin('math') is not None\n",
+        encoding="utf-8",
+    )
+
+    exit_code = main(["check", "--json", "--files", str(app_py)])
+    captured = capsys.readouterr()
+
+    # Must parse successfully as JSON
+    data = json.loads(captured.out)
+    assert data["summary"]["dependency_findings"]["unscanned"] >= 1
+    assert len(data["dependencies"]["unscanned_sources"]) >= 1
+    assert exit_code == 0
+
 
 
 

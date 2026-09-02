@@ -399,9 +399,14 @@ def synthesize_tests_for_surviving_mutants(
     results: List[SynthesizedTest] = []
     seen_names: Set[str] = set()
 
-    for m in surviving_mutants:
+    for idx, m in enumerate(surviving_mutants, 1):
         test_obj = synthesizer.synthesize_for_mutant(m)
-        if test_obj and test_obj.test_name not in seen_names:
+        if test_obj:
+            if test_obj.test_name in seen_names:
+                old_name = test_obj.test_name
+                new_name = f"{old_name}_v{idx}"
+                test_obj.test_name = new_name
+                test_obj.test_code = test_obj.test_code.replace(f"def {old_name}(", f"def {new_name}(", 1)
             seen_names.add(test_obj.test_name)
             results.append(test_obj)
 
