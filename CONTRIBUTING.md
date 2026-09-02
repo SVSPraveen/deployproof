@@ -66,10 +66,4 @@ deployproof check --workers 4
 
 Please maintain a welcoming, respectful, and constructive environment for all contributors.
 
----
-
-## Core Contributors
-
-* **[SVS Praveen](https://github.com/SVSPraveen)** — Project Creator & Lead Architect
-* **[nube-k](https://github.com/nube-k)** — Core Contributor
 
