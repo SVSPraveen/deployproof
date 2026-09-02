@@ -49,14 +49,15 @@ dev = [
     "build>=1.0.0",
     "twine>=4.0.0",
     "coverage>=7.0.0",
+    "pyyaml>=6.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/SVSPraveen/DeployProof"
-Documentation = "https://svspraveen.github.io/DeployProof/"
+Homepage = "https://github.com/SVSPraveen/deployproof"
+Documentation = "https://svspraveen.github.io/deployproof/"
 Portfolio = "https://svspraveen.vercel.app/"
-Repository = "https://github.com/SVSPraveen/DeployProof.git"
-"Bug Tracker" = "https://github.com/SVSPraveen/DeployProof/issues"
+Repository = "https://github.com/SVSPraveen/deployproof.git"
+"Bug Tracker" = "https://github.com/SVSPraveen/deployproof/issues"
 
 [project.scripts]
 deployproof = "deployproof.cli:main"

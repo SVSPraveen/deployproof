@@ -163,14 +163,20 @@ def test_cli_github_actions_flag(tmp_path: Path, monkeypatch, capsys):
 
 def test_pre_commit_hooks_yaml():
     """Verify .pre-commit-hooks.yaml exists and defines standard hook IDs."""
-    import yaml
     root = Path(__file__).resolve().parent.parent
     hooks_file = root / ".pre-commit-hooks.yaml"
     assert hooks_file.is_file()
 
-    data = yaml.safe_load(hooks_file.read_text(encoding="utf-8"))
-    assert isinstance(data, list)
-    hook_ids = [h.get("id") for h in data]
+    content = hooks_file.read_text(encoding="utf-8")
+    try:
+        import yaml
+        data = yaml.safe_load(content)
+        assert isinstance(data, list)
+        hook_ids = [h.get("id") for h in data]
+    except ImportError:
+        import re
+        hook_ids = re.findall(r"(?:^|\n)\s*-\s*id:\s*([a-zA-Z0-9_\-]+)", content)
+
     assert "deployproof" in hook_ids
     assert "deployproof-check" in hook_ids
     assert "deployproof-full" in hook_ids

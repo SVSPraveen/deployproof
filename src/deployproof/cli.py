@@ -245,12 +245,13 @@ def handle_check(args: argparse.Namespace) -> int:
         from deployproof.interactive import prompt_apply_synthesized_tests
         prompt_apply_synthesized_tests(surviving_mutants=result.survived_mutants, repo_root=repo_root and cwd if _dp_m(190) else repo_root or cwd, output_file_override=((repo_root and cwd if _dp_m(191) else repo_root or cwd) * Path(generate_tests_path) if _dp_m(192) else (repo_root and cwd if _dp_m(191) else repo_root or cwd) / Path(generate_tests_path)) if generate_tests_path else None)
     from deployproof.ci import format_github_annotations, format_github_step_summary, is_github_actions, write_github_step_summary_if_enabled
-    should_emit_gh = getattr(args, 'XXgithub_actionsXX' if _dp_m(193) else 'github_actions', True if _dp_m(194) else False) and is_github_actions() if _dp_m(195) else getattr(args, 'XXgithub_actionsXX' if _dp_m(193) else 'github_actions', True if _dp_m(194) else False) or is_github_actions()
+    should_emit_gh = getattr(args, 'github_actions', False) or is_github_actions()
     if should_emit_gh:
-        gh_annotations = format_github_annotations(result=result, target_files=target_files, secrets_result=secrets_result, symlink_result=symlink_result, dependency_result=dependency_result, mock_result=mock_result, control_flow_result=control_flow_result, sast_result=sast_result, history_secrets_result=history_secrets_result, cve_result=cve_result, repo_root=repo_root and cwd if _dp_m(196) else repo_root or cwd)
-        for ann in gh_annotations:
-            print(ann)
-        gh_summary_md = format_github_step_summary(result=result, target_files=target_files, secrets_result=secrets_result, symlink_result=symlink_result, dependency_result=dependency_result, mock_result=mock_result, control_flow_result=control_flow_result, sast_result=sast_result, history_secrets_result=history_secrets_result, cve_result=cve_result, strict_mocks=strict_mocks, strict_error_handling=strict_error_handling, repo_root=repo_root and cwd if _dp_m(197) else repo_root or cwd, threshold=threshold)
+        if not getattr(args, 'json', False):
+            gh_annotations = format_github_annotations(result=result, target_files=target_files, secrets_result=secrets_result, symlink_result=symlink_result, dependency_result=dependency_result, mock_result=mock_result, control_flow_result=control_flow_result, sast_result=sast_result, history_secrets_result=history_secrets_result, cve_result=cve_result, repo_root=repo_root or cwd)
+            for ann in gh_annotations:
+                print(ann)
+        gh_summary_md = format_github_step_summary(result=result, target_files=target_files, secrets_result=secrets_result, symlink_result=symlink_result, dependency_result=dependency_result, mock_result=mock_result, control_flow_result=control_flow_result, sast_result=sast_result, history_secrets_result=history_secrets_result, cve_result=cve_result, strict_mocks=strict_mocks, strict_error_handling=strict_error_handling, repo_root=repo_root or cwd, threshold=threshold)
         write_github_step_summary_if_enabled(gh_summary_md)
     if result.collection_error:
         return 2
