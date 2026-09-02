@@ -82,14 +82,7 @@ Test purpose/
 deployproof-demo.*
 demo.*
 
-# Local blog drafts, marketing posts & internal design notes
+# Local blog drafts
 DEVTO_POST.md
 DEVTO_BODY_ONLY.md
 DEV_TO_POST.md
-DECISIONS.md
-DeployProof-scope.md
-FUTURE_SCOPE.md
-GROWTH_SCOPE.md
-INVESTIGATION_blastradius.md
-MAINTENANCE.md
-scripts/render_terminal_card.py
