@@ -14,8 +14,8 @@ Thank you for your interest in contributing to DeployProof! DeployProof is an op
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/SVSPraveen/DeployProof.git
-   cd DeployProof
+   git clone https://github.com/SVSPraveen/deployproof.git
+   cd deployproof
    ```
 
 2. **Create and activate a virtual environment**:

@@ -4,6 +4,7 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 1.1.x   | :white_check_mark: |
 | 1.0.x   | :white_check_mark: |
 | < 1.0   | :x:                |
 
@@ -14,7 +15,7 @@
 DeployProof is dedicated to local-first security and developer safety. If you discover a security vulnerability, sandbox-escape defect, or potential credential exposure vector within DeployProof:
 
 1. **Do NOT open a public GitHub issue.**
-2. Please report findings privately via **GitHub Private Vulnerability Reporting** on the repository page: `https://github.com/SVSPraveen/DeployProof/security/advisories/new`.
+2. Please report findings privately via **GitHub Private Vulnerability Reporting** on the repository page: `https://github.com/SVSPraveen/deployproof/security/advisories/new`.
 3. Include a detailed description of the vulnerability, reproduction steps or sample repository fixture, and potential impact.
 
 ### Response & Disclosure Process

@@ -140,7 +140,8 @@ deployproof check --json
 
 DeployProof has been verified against major open-source repositories including `requests`, `click`, and `colorama`.
 
-* **GitHub**: [https://github.com/SVSPraveen/DeployProof](https://github.com/SVSPraveen/DeployProof)
+* **GitHub**: [https://github.com/SVSPraveen/deployproof](https://github.com/SVSPraveen/deployproof)
 * **PyPI**: [https://pypi.org/project/deployproof/](https://pypi.org/project/deployproof/)
+* **Documentation**: [https://svspraveen.github.io/deployproof/](https://svspraveen.github.io/deployproof/)
 
 If you test it out on your repositories, drop a comment below with your thoughts, edge cases, or feature requests! If you find it useful, a star on GitHub is always appreciated! ⭐

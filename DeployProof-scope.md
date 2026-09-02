@@ -1,6 +1,6 @@
-# DeployProof — Architectural Scope & Engineering Specification
+# DeployProof Product Scope & Verified Feature Matrix
 
-*Package: `deployproof` (v1.1.11 on PyPI). Repository: github.com/SVSPraveen/DeployProof. Status: Released September 1, 2026.*
+*Package: `deployproof` (v1.1.2 on PyPI). Repository: github.com/SVSPraveen/deployproof. Status: Released.*
 
 ---
 

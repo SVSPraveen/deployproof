@@ -4,15 +4,15 @@
 
 [![PyPI version](https://img.shields.io/badge/pypi-v1.1.2-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
-[![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-261%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
+[![CI](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-261%20passed-2ea44f.svg)](https://github.com/SVSPraveen/deployproof)
 [![Stress Tests](https://img.shields.io/badge/stress%20tests-14%2F14%20passed-2ea44f.svg)](stress_fixtures/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-DeployProof%20Portal-6366f1.svg)](https://svspraveen.github.io/DeployProof/)
+[![Docs](https://img.shields.io/badge/docs-DeployProof%20Portal-6366f1.svg)](https://svspraveen.github.io/deployproof/)
 
 ---
 
-> 📖 **[View the Complete Documentation & Interactive Product Portal](https://svspraveen.github.io/DeployProof/)**
+> 📖 **[View the Complete Documentation & Interactive Product Portal](https://svspraveen.github.io/deployproof/)**
 
 ## Why This Exists
 
@@ -471,7 +471,7 @@ jobs:
 ### Pre-Commit Framework (.pre-commit-config.yaml)
 ```yaml
 repos:
-  - repo: https://github.com/SVSPraveen/DeployProof
+  - repo: https://github.com/SVSPraveen/deployproof
     rev: v1.1.2
     hooks:
       - id: deployproof-check
