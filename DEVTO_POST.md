@@ -8,28 +8,28 @@ Why 100% Test Coverage is Deceptive (And How We Made Python Mutation Testing Run
 ---
 
 ## 2. Tags (Copy and paste into "Add up to 4 tags..."):
-python, testing, opensource, programming
+`python`, `testing`, `opensource`, `devops`
 
 ---
 
-## 3. Main Article Body (Copy everything below this line into the article editor):
+## 3. Main Article Body (Copy everything below this line into the Dev.to editor):
 
-We've all seen pull requests boasting 90%+ or even 100% line coverage. Everything looks green, the tests pass in CI, and the PR gets merged.
+We've all seen pull requests boasting 90%+ or even 100% line coverage. Everything looks green, the test suite passes in CI, and the PR gets merged.
 
 A few days later, a subtle logic bug blows up production.
 
 How does this happen? **Because line coverage measures execution paths, not assertion quality.**
 
-With the explosion of AI coding assistants (Copilot, Cursor, Claude), generating tests has become trivial. But AI assistants routinely generate boilerplate tests that execute functions without asserting true invariants:
+With the explosion of AI coding assistants (Copilot, Cursor, Claude, Devin), generating tests has become effortless. But AI assistants routinely generate boilerplate tests that execute functions without asserting true invariants:
 
 ```python
 def test_calculate_discount():
-    # Executes every line in calculate_discount(), giving 100% line coverage!
+    # Executes every line in calculate_discount(), yielding 100% line coverage!
     result = calculate_discount(price=100, is_vip=True)
     assert result is not None  # Never asserts the actual discount math!
 ```
 
-That test passes with flying colors while touching 100% of the function's lines. But if a bug inverts `price * 0.8` to `price * 1.5`, the test still passes!
+That test passes with flying colors while touching 100% of the function's lines. But if a bug inverts `price * 0.8` to `price * 1.5`, the test still passes and the bug ships unnoticed.
 
 ---
 
@@ -37,111 +37,157 @@ That test passes with flying colors while touching 100% of the function's lines.
 
 The true metric of test suite integrity is **mutation testing**:
 
-1. An engine modifies your code’s Abstract Syntax Tree (AST) — swapping `==` to `!=`, `<` to `>=`, or replacing return values with `None`.
+1. An engine modifies your code’s Abstract Syntax Tree (AST) — swapping `==` to `!=`, `<` to `>=`, inverting booleans, or replacing return values with `None`.
 2. It runs your test suite against each generated "mutant."
 3. If your tests **fail**, the mutant is **killed** (your tests assert true correctness).
 4. If your tests **pass**, the mutant **survived** (your test coverage is hollow).
 
-### The Bottleneck: Mutation Testing is Painfully Slow
+### The Bottleneck: Why Nobody Used Mutation Testing
+Traditional mutation testing tools like `mutmut` rewrite files to disk and test your entire repository. On a codebase with hundreds of mutants, running test suites repeatedly takes **20 to 60+ minutes**.
 
-Traditional mutation testing tools like `mutmut` test your entire repository. On a codebase with hundreds of mutants, running test suites repeatedly takes **20 to 60+ minutes**.
-
-Because of that latency, mutation testing has remained an expensive, rarely run overnight CI job rather than an active pre-commit or pre-push quality gate.
+Because of that latency, mutation testing remained an expensive, rarely run overnight CI job rather than an active pre-push quality gate.
 
 ---
 
-## The Solution: DeployProof and Diff-Scoped AST Mutation
+## The Solution: DeployProof and In-Memory AST Mutation
 
-I built **[DeployProof](https://github.com/SVSPraveen/DeployProof)** to solve the latency problem.
+I built **[DeployProof](https://github.com/SVSPraveen/deployproof)** to eliminate the latency problem.
 
-Instead of mutating your entire codebase, DeployProof:
-1. Parses your active `git diff` against your base branch or uncommitted working tree.
-2. Translates the modified line spans into their specific **AST subtrees**.
-3. Generates and executes isolated mutations **strictly on the newly written or modified logic**.
+Instead of modifying files on disk, DeployProof:
+1. **Scopes directly to your `git diff`**: Only newly written or modified lines in your active session are evaluated.
+2. **In-Memory AST Schemata**: Injects all AST mutants into a unified compiled tree switched dynamically in warm Python interpreter memory (`__DEPLOYPROOF_MUTANT__`), completely bypassing disk I/O.
+3. **Dead-Code & Equivalence Pruning**: Static taint analyzer skips unkillable dead code and equivalent mutants before test dispatch.
 
-By scoping mutations directly to touched code, DeployProof drops the feedback loop down to **2 to 5 seconds**. You get instant, deterministic proof of whether your new code has genuine assertion backing before you push:
+By combining in-memory AST schemata with diff-scoping, DeployProof drops the feedback loop down to **2 to 5 seconds**. You get instant, deterministic proof of whether your new code has genuine assertion backing before you push:
 
 ```text
 $ deployproof check
 
-[Target Discovery]
-  Target Files: 1 (src/auth/tokens.py)
-  Test Files:   1 (tests/test_tokens.py)
+Target Scope (1 file evaluated):
+  * src/auth/tokens.py
 
-[Mutation Engine] (diff-scoped)
-  Generated Mutants: 6
-  Killed:            6
-  Survived:          0
-  Mutation Score:    100.0%
+Local Pre-Check Mutation Verification:
+  Score:  100.0% (6/6 mutants killed)
+  Status: PASSED (0 surviving mutants) (threshold: 80.0%)
+  Time:   1.84s
 
-[Gate Result] PASSED (duration: 2.14s)
+[Gate Result] PASSED (All 7 Verification Gates Clean)
 ```
 
 ---
 
-## 4 Other Pre-Push Hygiene Gates
+## 🧬 Feature Highlight: Actionable Self-Healing Tests
 
-While building the diff-scoped AST engine, I added 4 critical sanity checks that standard linters miss:
-
-* **Dependency Hallucination & Slopsquatting Defense**: AI coding tools frequently introduce dependencies that do not exist on public PyPI. DeployProof queries the official PyPI JSON API before push to verify every new package in `requirements.txt` or inline imports actually exists.
-* **Shannon Entropy Secret Scanning**: Catches accidentally tracked `.env` files, leaked OpenAI/Anthropic/AWS API keys, and bearer tokens introduced in session diffs using entropy analysis.
-* **Control Flow & Swallowed Exceptions**: Detects and blocks dangerous blanket `except Exception: pass` anti-patterns that hide runtime failures, as well as unverified mock fixtures.
-* **GhostApproval Symlink Defense**: Traps repository sandbox-escaping symlinks before commits can reach CI.
-
----
-
-## Deep Multi-Worker Audits
-
-If you want to audit your entire repository, DeployProof includes a parallel multi-worker engine:
+When a mutant survives because a test is missing an assertion, DeployProof doesn't just give you an error — it can **write the fix for you**:
 
 ```bash
-deployproof check --full-repo --workers 8
+deployproof check --heal-tests
 ```
 
-It uses a `ProcessPoolExecutor` where each worker runs in an isolated, PID-keyed filesystem sandbox (`worker_<PID>`) with dedicated `--override-ini=cache_dir=...` and separate `--basetemp=...` pytest roots to scale across CPU cores without lock contention or state leaks.
+DeployProof analyzes the surviving AST mutation, infers parameter types, and auto-synthesizes a ready-to-run pytest test case:
+
+```python
+# Auto-generated by DeployProof in tests/test_deployproof_healed.py
+def test_kill_calculate_discount_line_4():
+    """
+    Auto-synthesized test to kill surviving mutant on line 4.
+    Target:  'if is_vip: return price * 0.8'
+    Mutated: 'if is_vip: return price * 1.5'
+    """
+    from auth.tokens import calculate_discount
+    result = calculate_discount(price=100, is_vip=True)
+    assert result == 80.0
+```
+
+You can even run in **Interactive Mode** (`deployproof check -i`) to review and apply synthesized tests with single-keystroke confirmation.
 
 ---
 
-## Privacy & Zero Telemetry
+## 🔒 The 7 Deterministic Verification Gates
 
-DeployProof runs **100% locally on your machine**.
+In addition to in-memory mutation testing, DeployProof evaluates every change against 6 other critical hygiene gates before code can leave your machine:
 
-There is zero telemetry, zero analytics, and zero external servers. The only outbound network call it makes is querying the public PyPI JSON API to check if a newly imported package exists.
+1. **🧬 In-Memory AST Mutation Engine**: Swaps operators, boundary values, and return statements in warm memory.
+2. **✨ Self-Healing Test Synthesizer**: Generates copy-pasteable pytest cases to close assertion gaps.
+3. **🔒 OWASP Top 10 SAST Scanner**: Detects SQL injection, shell command execution, insecure deserialization (`pickle`), and path traversals via AST visitors.
+4. **🔑 Shannon Entropy Secrets Scanner**: Scans working tree files and up to 50 previous git commits to catch hardcoded API keys, tokens, and tracked `.env` files.
+5. **📦 OSV.dev Live CVE & Slopsquatting Defense**: Queries OSV.dev for known dependency advisories and PyPI to catch hallucinated package names invented by LLMs.
+6. **🔗 GhostApproval Symlink Defense**: Traps repository sandbox-escaping symlinks before commits reach CI.
+7. **⚙️ Control Flow & Strict Error Handling**: Detects bare `except:`, swallowed exceptions (`except Exception: pass`), and unreachable dead code.
 
 ---
 
-## Getting Started
+## CI/CD Native GitHub Actions Integration
+
+DeployProof runs natively inside GitHub Actions with zero external SaaS dependencies. When run with `--github-actions`, it automatically emits inline PR annotations on modified lines and generates a rich verification dashboard in `$GITHUB_STEP_SUMMARY`:
+
+```yaml
+# .github/workflows/verify.yml
+name: Pre-Merge Quality Gate
+on: [push, pull_request]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e . && pip install deployproof pytest
+      - run: deployproof check --github-actions --workers 4
+```
+
+---
+
+## 5-Minute Quickstart
 
 DeployProof is free, open-source (MIT licensed), and available on PyPI.
 
 ### Installation
 
 ```bash
-# Recommended: Isolated global CLI install
+# Recommended: Global CLI install via pipx
 pipx install deployproof
 
 # Or via standard pip
 pip install deployproof
 ```
 
-### Run Checks
+### Basic Commands
 
 ```bash
-# Check active git diff (2–5s)
+# Run pre-push gate on current git diff (2–5s)
 deployproof check
 
-# Output machine-readable JSON for CI/CD pipelines
+# Synthesize self-healing tests for surviving mutants
+deployproof check --heal-tests
+
+# Audit entire repository with multi-worker sandboxes
+deployproof check --full-repo --workers 8
+
+# Output machine-readable JSON for IDEs & tooling
 deployproof check --json
 ```
 
 ---
 
+## Privacy & Zero Telemetry Guarantee
+
+DeployProof runs **100% locally on your machine**.
+
+* Zero external telemetry or analytics.
+* Zero cloud dependencies or accounts required.
+* The only outbound network query is a read-only call to the official PyPI registry / OSV database to verify package safety.
+
+---
+
 ## Try It & Share Feedback
 
-DeployProof has been verified against major open-source repositories including `requests`, `click`, and `colorama`.
+DeployProof has been validated across major open-source codebases including `requests`, `click`, and `colorama`.
 
-* **GitHub**: [https://github.com/SVSPraveen/deployproof](https://github.com/SVSPraveen/deployproof)
-* **PyPI**: [https://pypi.org/project/deployproof/](https://pypi.org/project/deployproof/)
-* **Documentation**: [https://svspraveen.github.io/deployproof/](https://svspraveen.github.io/deployproof/)
+* 🐙 **GitHub**: [https://github.com/SVSPraveen/deployproof](https://github.com/SVSPraveen/deployproof)
+* 📦 **PyPI**: [https://pypi.org/project/deployproof/](https://pypi.org/project/deployproof/)
+* 📖 **Documentation Portal**: [https://svspraveen.github.io/deployproof/](https://svspraveen.github.io/deployproof/)
 
-If you test it out on your repositories, drop a comment below with your thoughts, edge cases, or feature requests! If you find it useful, a star on GitHub is always appreciated! ⭐
+If you give it a spin on your repositories, let me know what you think! ⭐
