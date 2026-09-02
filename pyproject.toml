@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deployproof"
-version = "1.1.2"
+version = "1.1.12"
 description = "Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis."
 readme = "README.md"
 requires-python = ">=3.10"

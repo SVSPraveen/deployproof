@@ -2,7 +2,7 @@
 
 > Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis. Built for human engineering teams and AI-assisted workflows alike.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v1.1.2-007ec6.svg)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/badge/pypi-v1.1.12-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-261%20passed-2ea44f.svg)](https://github.com/SVSPraveen/deployproof)
@@ -472,14 +472,14 @@ jobs:
 ```yaml
 repos:
   - repo: https://github.com/SVSPraveen/deployproof
-    rev: v1.1.2
+    rev: v1.1.12
     hooks:
       - id: deployproof-check
 ```
 
 ## Status & Roadmap
 
-- **Current (v1.1.2):** In-Memory AST Schemata Mutation Testing, Actionable Self-Healing Test Synthesizer (`--heal-tests`), Interactive Quick-Fix Mode (`-i`), `pyproject.toml` `[tool.deployproof]` configuration engine, GitHub Actions native inline annotations and `$GITHUB_STEP_SUMMARY` dashboard, `.pre-commit-hooks.yaml` support, Full Repository Audit Mode (`--full-repo`) with isolated multi-worker sandboxes, AST OWASP Top 10 SAST scanner, 50-commit git history secrets scanner, OSV CVE database verification, GhostApproval symlink sandbox escape detector, **261 unit tests**, and complete `/docs` product portal.
+- **Current (v1.1.12):** In-Memory AST Schemata Mutation Testing, Actionable Self-Healing Test Synthesizer (`--heal-tests`), Interactive Quick-Fix Mode (`-i`), `pyproject.toml` `[tool.deployproof]` configuration engine, GitHub Actions native inline annotations and `$GITHUB_STEP_SUMMARY` dashboard, `.pre-commit-hooks.yaml` support, Full Repository Audit Mode (`--full-repo`) with isolated multi-worker sandboxes, AST OWASP Top 10 SAST scanner, 50-commit git history secrets scanner, OSV CVE database verification, GhostApproval symlink sandbox escape detector, **261 unit tests**, and complete `/docs` product portal.
 - **Next:** Reverse test-to-source dependency mapping (see `FUTURE_SCOPE.md`), SARIF 2.1.0 report exporter, and multi-language mutation rule packs.
 
 ## Contributing

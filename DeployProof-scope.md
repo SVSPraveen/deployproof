@@ -1,6 +1,6 @@
 # DeployProof Product Scope & Verified Feature Matrix
 
-*Package: `deployproof` (v1.1.2 on PyPI). Repository: github.com/SVSPraveen/deployproof. Status: Released.*
+*Package: `deployproof` (v1.1.12 on PyPI). Repository: github.com/SVSPraveen/deployproof. Status: Released.*
 
 ---
 
