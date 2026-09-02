@@ -82,7 +82,11 @@ Test purpose/
 deployproof-demo.*
 demo.*
 
-# Local blog drafts
+# Local blog drafts & internal maintainer scratchpads
 DEVTO_POST.md
 DEVTO_BODY_ONLY.md
 DEV_TO_POST.md
+INVESTIGATION_blastradius.md
+MAINTENANCE.md
+DeployProof-scope.md
+GROWTH_SCOPE.md
