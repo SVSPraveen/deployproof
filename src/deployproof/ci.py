@@ -104,7 +104,9 @@ def format_github_annotations(
                 rel = f.file_path.relative_to(root).as_posix()
             except ValueError:
                 rel = f.file_path.as_posix()
-            msg = _escape_github_data(f"[{f.pattern_name}] {f.description}")
+            r_id = getattr(f, "rule_id", getattr(f, "pattern_name", "control_flow"))
+            r_msg = getattr(f, "message", getattr(f, "description", "Control flow anomaly detected"))
+            msg = _escape_github_data(f"[{r_id}] {r_msg}")
             commands.append(f"::warning file={rel},line={f.line_number},title=Control%20Flow%20Issue::{msg}")
 
     # 7. Surviving Mutants (Warning)
