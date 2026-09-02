@@ -164,7 +164,7 @@ DeployProof enforces strict local execution guarantees:
 
 | Phase | Milestone | Focus Areas |
 |---|---|---|
-| **Phase 1** | **Python Core (v1.1.11)** | Native AST mutation engine, Git diff cascading, credential scanner, GhostApproval symlinks, slopsquatting age detector. |
+| **Phase 1** | **Python Core (v1.1.14)** | Native AST mutation engine, Git diff cascading, credential scanner, GhostApproval symlinks, slopsquatting age detector. |
 | **Phase 2** | **Reverse Dependency Mapping** | Blast-radius AST indexer connecting modified test suites back to unmodified source files. |
 | **Phase 3** | **CI & SARIF Integration** | SARIF 2.1.0 report generation, GitHub Actions pre-merge gating. |
 | **Phase 4** | **Multi-Language Expansion** | StrykerJS (JS/TS), PIT (Java), cargo-mutants (Rust), Gremlins (Go). |

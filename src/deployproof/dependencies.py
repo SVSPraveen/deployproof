@@ -1188,12 +1188,12 @@ def query_pypi_registry(
     try:
         from deployproof import __version__
     except ImportError:
-        __version__ = "1.1.2"
+        __version__ = "1.1.14"
 
     url = f"https://pypi.org/pypi/{canonical_pkg}/json"
     req = urllib.request.Request(
         url,
-        headers={"User-Agent": f"DeployProof/{__version__} (https://github.com/SVSPraveen/DeployProof)"},
+        headers={"User-Agent": f"DeployProof/{__version__} (https://github.com/SVSPraveen/deployproof)"},
     )
 
     try:

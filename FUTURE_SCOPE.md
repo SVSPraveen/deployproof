@@ -17,11 +17,11 @@ Why it matters: This is the primary blind spot in diff-scoped mutation testing â
 
 ---
 
-## CI / GitHub PR Integration (Native Integration Shipped in v1.1.2)
+## CI / GitHub PR Integration (Native Integration Shipped in v1.1.14)
 
-Status: Core Native Support Shipped in `v1.1.2` (`src/deployproof/ci.py`).
+Status: Core Native Support Shipped in `v1.1.14` (`src/deployproof/ci.py`).
 
-What was delivered in v1.1.2:
+What was delivered in v1.1.14:
 - Native GitHub Actions workflow command emission: `::error file=...,line=...::` and `::warning file=...,line=...::` annotations directly on PR diff lines.
 - Automatic Markdown step summary table emission written to `$GITHUB_STEP_SUMMARY`.
 - `--github-actions` / `--ci` flag and automated `GITHUB_ACTIONS=true` environment detection.

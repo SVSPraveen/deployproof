@@ -298,7 +298,7 @@ DeployProof provides a rich command-line interface with fine-grained control ove
 | **Check (Default Gate)** | `deployproof check [options]` | Runs all 7 deterministic pre-push verification gates on the modified files in the current git working tree session. | Evaluates git working tree diff against `HEAD` |
 | **Initialize Pre-Push Hook** | `deployproof init` | Automatically installs the DeployProof pre-push hook into `.git/hooks/pre-push` and generates an initial `pyproject.toml` `[tool.deployproof]` configuration block. | Installs executable shell/powershell hook |
 | **Inspect Diff Scope** | `deployproof diff` | Prints the detected git diff status, modified source files, and test files currently in scope without running tests. | Shows current diff session files |
-| **Version** | `deployproof --version` | Displays the current installed version of DeployProof. | Displays `deployproof 1.1.2` |
+| **Version** | `deployproof --version` | Displays the current installed version of DeployProof. | Displays `deployproof 1.1.14` |
 | **Help** | `deployproof --help` | Displays full interactive command usage and flag descriptions. | Prints CLI help manual |
 
 #### Mutation Testing & Self-Healing Options
@@ -347,7 +347,7 @@ deployproof check --json
 
 ```json
 {
-  "version": "1.1.11",
+  "version": "1.1.14",
   "status": "passed",
   "summary": {
     "target_files_count": 1,
