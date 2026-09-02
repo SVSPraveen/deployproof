@@ -482,6 +482,11 @@ repos:
 - **Current (v1.1.15):** In-Memory AST Schemata Mutation Testing, Actionable Self-Healing Test Synthesizer (`--heal-tests`), Interactive Quick-Fix Mode (`-i`), `pyproject.toml` `[tool.deployproof]` configuration engine, GitHub Actions native inline annotations and `$GITHUB_STEP_SUMMARY` dashboard, `.pre-commit-hooks.yaml` support, Full Repository Audit Mode (`--full-repo`) with isolated multi-worker sandboxes, AST OWASP Top 10 SAST scanner, 50-commit git history secrets scanner, OSV CVE database verification, GhostApproval symlink sandbox escape detector, **265 unit tests**, and complete `/docs` product portal.
 - **Next:** Reverse test-to-source dependency mapping (see `FUTURE_SCOPE.md`), SARIF 2.1.0 report exporter, and multi-language mutation rule packs.
 
+## Contributors & Acknowledgements
+
+* **[SVS Praveen](https://github.com/SVSPraveen)** — Creator & Lead Architect
+* **[nube-k](https://github.com/nube-k)** — Core Contributor
+
 ## Contributing
 
 Issues and pull requests are welcome. Open an issue first for significant changes so the approach can be discussed before implementation.
@@ -493,4 +498,5 @@ MIT. See [LICENSE](LICENSE).
 ---
 
 *Created & Architected by [SVS Praveen](https://github.com/SVSPraveen) · [Portfolio](https://svspraveen.vercel.app/) · [LinkedIn](https://www.linkedin.com/in/svs-praveen-s/)*
+
 
