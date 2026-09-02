@@ -8,21 +8,58 @@ from typing import List, Optional, Set
 IGNORED_DIRS = {
     ".venv",
     "venv",
-    ".env",
-    "env",
     "node_modules",
     "build",
     "dist",
     ".tox",
     ".mutmut-cache",
     "scratch_repos",
+    "scratch",
+    "stress_fixtures",
+    "Test purpose",
+    "fixtures",
     ".git",
     "__pycache__",
     ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
     "docs",
     "doc",
     ".github",
 }
+
+
+def is_ignored_path(path: Path, root: Path) -> bool:
+    """
+    Check if a path is located inside an ignored directory.
+    
+    Checks directory ancestor components relative to root only (never the filename itself),
+    ensuring files like .env or files inside a legitimate 'env' package (e.g. env/game_env.py)
+    are NOT skipped.
+    """
+    try:
+        p_res = path.resolve()
+        r_res = root.resolve()
+        rel_parent = p_res.relative_to(r_res).parent
+        parent_parts = set(rel_parent.parts)
+    except ValueError:
+        parent_parts = set()
+
+    if parent_parts.intersection(IGNORED_DIRS):
+        return True
+
+    # Check for custom virtualenv directories named 'env' or '.env'
+    for part in parent_parts:
+        if part in {"env", ".env"}:
+            try:
+                idx = path.parts.index(part)
+                dir_path = Path(*path.parts[:idx + 1])
+                if (dir_path / "pyvenv.cfg").exists() or (dir_path / "bin" / "activate").exists() or (dir_path / "Scripts" / "activate.bat").exists():
+                    return True
+            except Exception:
+                pass
+
+    return False
 
 
 class DiffScopeError(Exception):
@@ -114,11 +151,18 @@ def is_excluded_mutation_target(path: Path, root: Optional[Path] = None) -> bool
     if name in {"setup.py", "conf.py"}:
         return True
 
-    parts = [p.lower() for p in path.parts]
-    if "docs" in parts or "doc" in parts or ".github" in parts:
+    if root:
+        try:
+            rel_parts = [p.lower() for p in path.resolve().relative_to(root.resolve()).parent.parts]
+        except ValueError:
+            rel_parts = [p.lower() for p in path.parent.parts]
+    else:
+        rel_parts = [p.lower() for p in path.parent.parts]
+
+    if any(p in {"docs", "doc", ".github", "demos", "examples", "benchmarks", "scratch", "stress_fixtures", "fixtures", "test purpose"} for p in rel_parts):
         return True
 
-    if name.endswith("_config.py"):
+    if "scripts" in rel_parts or name.endswith("_config.py"):
         if root:
             from deployproof.mutator import discover_target_tests
             target_tests = discover_target_tests([path], root)
@@ -135,7 +179,7 @@ def get_uncommitted_session_files(root: Path) -> Set[Path]:
     files: Set[Path] = set()
 
     # 1. Check status for modified, staged, untracked files
-    res = run_git(["status", "--porcelain"], root)
+    res = run_git(["status", "--porcelain", "-uall"], root)
     if res.returncode == 0:
         for line in res.stdout.splitlines():
             line = line.strip()
@@ -147,9 +191,13 @@ def get_uncommitted_session_files(root: Path) -> Set[Path]:
                 if "->" in rel_path:
                     rel_path = rel_path.split("->")[-1].strip()
                 rel_path = rel_path.strip('"')
-                p = (root / rel_path).resolve()
-                if p.is_file():
+                p = root / rel_path
+                if p.is_file() or p.is_symlink() or os.path.islink(p):
                     files.add(p)
+                elif p.is_dir():
+                    for sub in p.rglob("*"):
+                        if sub.is_file() or sub.is_symlink() or os.path.islink(sub):
+                            files.add(sub)
 
     # 2. Check unstaged diff against HEAD (if commits exist)
     if has_commits(root):
@@ -158,9 +206,13 @@ def get_uncommitted_session_files(root: Path) -> Set[Path]:
             for rel_path in res_diff.stdout.splitlines():
                 rel_path = rel_path.strip().strip('"')
                 if rel_path:
-                    p = (root / rel_path).resolve()
-                    if p.is_file():
+                    p = root / rel_path
+                    if p.is_file() or p.is_symlink() or os.path.islink(p):
                         files.add(p)
+                    elif p.is_dir():
+                        for sub in p.rglob("*"):
+                            if sub.is_file() or sub.is_symlink() or os.path.islink(sub):
+                                files.add(sub)
 
     return files
 
@@ -176,8 +228,8 @@ def get_latest_commit_session_files(root: Path) -> Set[Path]:
         for rel_path in res.stdout.splitlines():
             rel_path = rel_path.strip().strip('"')
             if rel_path:
-                p = (root / rel_path).resolve()
-                if p.is_file():
+                p = root / rel_path
+                if p.is_file() or p.is_symlink() or os.path.islink(p):
                     files.add(p)
     return files
 
@@ -195,12 +247,12 @@ def get_diff_against_base_session_files(root: Path, base: str) -> Set[Path]:
         for rel_path in res.stdout.splitlines():
             rel_path = rel_path.strip().strip('"')
             if rel_path:
-                p = (root / rel_path).resolve()
-                if p.is_file():
+                p = root / rel_path
+                if p.is_file() or p.is_symlink() or os.path.islink(p):
                     files.add(p)
 
     # Include untracked files
-    res_status = run_git(["status", "--porcelain"], root)
+    res_status = run_git(["status", "--porcelain", "-uall"], root)
     if res_status.returncode == 0:
         for line in res_status.stdout.splitlines():
             line = line.strip()
@@ -208,9 +260,13 @@ def get_diff_against_base_session_files(root: Path, base: str) -> Set[Path]:
                 parts = line.split(maxsplit=1)
                 if len(parts) == 2:
                     rel_path = parts[1].strip().strip('"')
-                    p = (root / rel_path).resolve()
-                    if p.is_file():
+                    p = root / rel_path
+                    if p.is_file() or p.is_symlink() or os.path.islink(p):
                         files.add(p)
+                    elif p.is_dir():
+                        for sub in p.rglob("*"):
+                            if sub.is_file() or sub.is_symlink() or os.path.islink(sub):
+                                files.add(sub)
 
     return files
 
@@ -236,11 +292,7 @@ def resolve_changed_session_files(
 
     filtered: List[Path] = []
     for p in changed:
-        try:
-            rel_parts = set(p.relative_to(root).parts)
-        except ValueError:
-            rel_parts = set(p.parts)
-        if rel_parts.intersection(IGNORED_DIRS):
+        if is_ignored_path(p, root):
             continue
         filtered.append(p)
 
@@ -342,14 +394,18 @@ def resolve_full_repo_session_files(cwd: Optional[Path] = None) -> List[Path]:
                 if not rel_path:
                     continue
                 p = (root / rel_path).resolve()
-                if not p.is_file():
+                if not (p.is_file() or p.is_symlink() or os.path.islink(p)):
                     continue
-                try:
-                    rel_parts = set(p.relative_to(root).parts)
-                except ValueError:
-                    rel_parts = set(p.parts)
-                if rel_parts.intersection(IGNORED_DIRS):
-                    continue
+                if target_dir != root:
+                    try:
+                        p.relative_to(target_dir)
+                    except ValueError:
+                        continue
+                    if is_ignored_path(p, target_dir):
+                        continue
+                else:
+                    if is_ignored_path(p, root):
+                        continue
                 files.append(p)
             return sorted(files)
 
@@ -360,13 +416,9 @@ def resolve_full_repo_session_files(cwd: Optional[Path] = None) -> List[Path]:
         root = target_dir
 
     files = []
-    for p in root.rglob("*"):
-        if p.is_file():
-            try:
-                rel_parts = set(p.relative_to(root).parts)
-            except ValueError:
-                rel_parts = set(p.parts)
-            if rel_parts.intersection(IGNORED_DIRS):
+    for p in target_dir.rglob("*"):
+        if p.is_file() or p.is_symlink() or os.path.islink(p):
+            if is_ignored_path(p, target_dir):
                 continue
             files.append(p.resolve())
     return sorted(files)

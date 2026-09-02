@@ -17,17 +17,18 @@ Why it matters: This is the primary blind spot in diff-scoped mutation testing â
 
 ---
 
-## CI / GitHub PR Integration
+## CI / GitHub PR Integration (Native Integration Shipped in v1.1.2)
 
-Status: Not started. Blocked on: real user demand (see criteria below).
+Status: Core Native Support Shipped in `v1.1.2` (`src/deployproof/ci.py`).
 
-What it would involve:
-- SARIF 2.1.0 output format (`--format=sarif` flag), mapping findings (mutation survivors, secrets, control-flow issues) to exact file/line positions so GitHub Actions can post them as inline PR comments via code-scanning.
-- A separate companion repo, `deployproof-action`, wrapping `deployproof check` for GitHub Actions - kept separate from the core deployproof package rather than bundled into it (same pattern as core mutation-testing tools that ship a thin CI wrapper as a distinct package).
+What was delivered in v1.1.2:
+- Native GitHub Actions workflow command emission: `::error file=...,line=...::` and `::warning file=...,line=...::` annotations directly on PR diff lines.
+- Automatic Markdown step summary table emission written to `$GITHUB_STEP_SUMMARY`.
+- `--github-actions` / `--ci` flag and automated `GITHUB_ACTIONS=true` environment detection.
 
-Why not now: No external user has asked for CI integration yet. Building it now would be guessing at requirements instead of building from real demand.
-
-Build trigger: The first time a real user (not the author) asks for CI/PR integration, or the first time deployproof has genuine external adoption and CI integration becomes a natural next ask.
+Future Expansion Backlog:
+- Direct SARIF 2.1.0 output format (`--format=sarif` flag) for native GitHub Advanced Security code scanning tab.
+- Companion marketplace GitHub Action (`deployproof/deployproof-action`).
 
 ---
 
@@ -36,8 +37,9 @@ Confirmed via research: MIT stays. AGPL was briefly considered earlier for anti-
 
 ---
 
-## Bus-Factor / Governance (Stage 5, unchanged trigger)
-Confirmed via research: OpenSSF Scorecard automatically penalizes solo-maintainer projects on three specific checks (Maintained, Contributors, Code-Review), and these scores feed real automated procurement blocks at large companies. Mitigation options, in order of commitment required: (1) list a designated backup maintainer, (2) pursue foundation/fiscal hosting (PSF, Software Freedom Conservancy), (3) an enterprise retainer model (precedent: Filippo Valsorda / Go cryptography). None of these are worth pursuing until there's real inbound enterprise interest - trigger unchanged from existing Stage 5 entry.
+## Project Governance & Stewardship
+
+OpenSSF Scorecard checks (Maintained, Contributors, Code-Review) feed automated procurement checks at large organizations. Future stewardship milestones include: (1) expanding core contributors, (2) pursuing foundation/fiscal hosting (Python Software Foundation), (3) enterprise support channels. These will be scheduled alongside enterprise customer demand.
 
 ---
 

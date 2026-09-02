@@ -29,6 +29,15 @@ class Mutant:
     status: str = 'PENDING'
 
 @dataclass
+class PrunedEquivalentMutant:
+    """Represents an equivalent mutant or dead-code location pruned before execution."""
+    file_path: Path
+    line_number: int
+    category: str
+    description: str
+    original_line: str = ''
+
+@dataclass
 class SkippedConstruct:
     """Represents an unsupported construct in source code that Tier 1 cannot mutate."""
     file_path: Path
@@ -46,6 +55,7 @@ class MutationResult:
     untested_files: List[Path] = field(default_factory=list)
     runner_errors: List[Tuple[Mutant, str]] = field(default_factory=list)
     skipped_constructs: List[SkippedConstruct] = field(default_factory=list)
+    pruned_equivalent_mutants: List[PrunedEquivalentMutant] = field(default_factory=list)
     mutation_score: Optional[float] = 100.0
     duration_seconds: float = 0.0
     files_tested: List[Path] = field(default_factory=list)
@@ -248,9 +258,87 @@ def remove_mutation_signal_handlers() -> None:
         _PREV_SIGBREAK = None
     _SIGNAL_HANDLER_INSTALLED = False
 COMPARE_MAP = {ast.Eq: (ast.NotEq, '==', '!='), ast.NotEq: (ast.Eq, '!=', '=='), ast.Lt: (ast.GtE, '<', '>='), ast.LtE: (ast.Gt, '<=', '>'), ast.Gt: (ast.LtE, '>', '<='), ast.GtE: (ast.Lt, '>=', '<'), ast.In: (ast.NotIn, 'in', 'not in'), ast.NotIn: (ast.In, 'not in', 'in'), ast.Is: (ast.IsNot, 'is', 'is not'), ast.IsNot: (ast.Is, 'is not', 'is')}
-BINOP_MAP = {ast.Add: (ast.Sub, '+', '-'), ast.Sub: (ast.Add, '-', '+'), ast.Mult: (ast.Div, '*', '/'), ast.Div: (ast.Mult, '/', '*'), ast.FloorDiv: (ast.Div, '//', '/'), ast.Mod: (ast.Mult, '%', '*'), ast.Pow: (ast.Mult, '**', '*'), ast.BitAnd: (ast.BitOr, '&', '|'), ast.BitOr: (ast.BitAnd, '|', '&'), ast.BitXor: (ast.BitAnd, '^', '&')}
+BINOP_MAP = {
+    ast.Add: (ast.Sub, '+', '-'),
+    ast.Sub: (ast.Add, '-', '+'),
+    ast.Mult: (ast.Div, '*', '/'),
+    ast.Div: (ast.Mult, '/', '*'),
+    ast.FloorDiv: (ast.Div, '//', '/'),
+    ast.Mod: (ast.Mult, '%', '*'),
+    ast.Pow: (ast.Mult, '**', '*'),
+    ast.LShift: (ast.RShift, '<<', '>>'),
+    ast.RShift: (ast.LShift, '>>', '<<'),
+    ast.BitAnd: (ast.BitOr, '&', '|'),
+    ast.BitOr: (ast.BitAnd, '|', '&'),
+    ast.BitXor: (ast.BitAnd, '^', '&'),
+}
 BOOLOP_MAP = {ast.And: (ast.Or, 'and', 'or'), ast.Or: (ast.And, 'or', 'and')}
-AUGASSIGN_MAP = {ast.Add: (ast.Sub, '+=', '-='), ast.Sub: (ast.Add, '-=', '+='), ast.Mult: (ast.Div, '*=', '/='), ast.Div: (ast.Mult, '/=', '*=')}
+AUGASSIGN_MAP = {
+    ast.Add: (ast.Sub, '+=', '-='),
+    ast.Sub: (ast.Add, '-=', '+='),
+    ast.Mult: (ast.Div, '*=', '/='),
+    ast.Div: (ast.Mult, '/=', '*='),
+    ast.FloorDiv: (ast.Div, '//=', '/='),
+    ast.Mod: (ast.Div, '%=', '/='),
+    ast.Pow: (ast.Mult, '**=', '*='),
+    ast.LShift: (ast.RShift, '<<=', '>>='),
+    ast.RShift: (ast.LShift, '>>=', '<<='),
+    ast.BitAnd: (ast.BitOr, '&=', '|='),
+    ast.BitOr: (ast.BitAnd, '|=', '&='),
+    ast.BitXor: (ast.BitAnd, '^=', '&='),
+}
+UNARYOP_MAP = {ast.USub: (ast.UAdd, '-', '+'), ast.UAdd: (ast.USub, '+', '-')}
+STRING_METHOD_SWAP = {
+    'lower': 'upper',
+    'upper': 'lower',
+    'strip': 'rstrip',
+    'lstrip': 'rstrip',
+    'rstrip': 'lstrip',
+    'find': 'rfind',
+    'rfind': 'find',
+    'index': 'rindex',
+    'rindex': 'index',
+    'split': 'rsplit',
+    'rsplit': 'split',
+    'partition': 'rpartition',
+    'rpartition': 'partition',
+    'ljust': 'rjust',
+    'rjust': 'ljust',
+    'startswith': 'endswith',
+    'endswith': 'startswith',
+    'removeprefix': 'removesuffix',
+    'removesuffix': 'removeprefix',
+}
+EXCEPT_MAP = {
+    'ValueError': 'ZeroDivisionError',
+    'KeyError': 'IndexError',
+    'TypeError': 'ValueError',
+    'IndexError': 'KeyError',
+    'AttributeError': 'TypeError',
+}
+
+def _is_special_builtin_call(call: ast.Call) -> bool:
+    if isinstance(call.func, ast.Name):
+        if call.func.id in ('isinstance', 'issubclass', 'getattr', 'setattr', 'hasattr', 'delattr', 'open', 'divmod', 'pow', 'is_log_or_print_call'):
+            return True
+    return False
+
+def _is_type_checking_guard(node: ast.If) -> bool:
+    """Check if an if-statement is guarding typing/TYPE_CHECKING imports."""
+    if isinstance(node.test, ast.Name) and node.test.id in ('TYPE_CHECKING', 'type_checking'):
+        return True
+    if isinstance(node.test, ast.Attribute) and node.test.attr == 'TYPE_CHECKING':
+        return True
+    return False
+
+def _is_overload_def(node: ast.AST) -> bool:
+    """Check if a function definition is a static typing @overload stub."""
+    for dec in getattr(node, 'decorator_list', []):
+        if isinstance(dec, ast.Name) and dec.id == 'overload':
+            return True
+        if isinstance(dec, ast.Attribute) and dec.attr == 'overload':
+            return True
+    return False
 
 class SkippedConstructCollector(ast.NodeVisitor):
     """Identifies and records unsupported Python constructs during AST traversal."""
@@ -277,10 +365,6 @@ class SkippedConstructCollector(ast.NodeVisitor):
         self._record_skip(node, 'Match Statement Pattern', 'Structural pattern matching shapes/rules not mutated by Tier 1')
         self.generic_visit(node)
 
-    def visit_Await(self, node: ast.Await) -> None:
-        self._record_skip(node, 'Await Expression', 'Async await call semantics and coroutine resolution not mutated by Tier 1')
-        self.generic_visit(node)
-
     def visit_Yield(self, node: ast.Yield) -> None:
         self._record_skip(node, 'Yield Statement', 'Generator yield statement semantics not mutated by Tier 1')
         self.generic_visit(node)
@@ -302,50 +386,372 @@ def is_log_or_print_call(call: ast.Call) -> bool:
             return True
     return False
 
+def _is_none_constant(node: Optional[ast.AST]) -> bool:
+    if node is None:
+        return True
+    if isinstance(node, ast.Constant) and node.value is None:
+        return True
+    if isinstance(node, ast.Name) and node.id == "None":
+        return True
+    return False
+
+def _is_docstring_expr(node: ast.AST) -> bool:
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+        return True
+    return False
+
+def _is_docstring_or_directive(node: ast.Constant) -> bool:
+    if not isinstance(node.value, str):
+        return True
+    val = node.value
+    if (val.startswith("__") and val.endswith("__")) or val in ("utf-8", "ascii", "r", "w", "a", "rb", "wb"):
+        return True
+    if len(val) > 300:
+        return True
+    return False
+
+def _stmt_always_terminates(stmt: ast.stmt) -> bool:
+    if isinstance(stmt, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+        return True
+    if isinstance(stmt, ast.If):
+        if stmt.orelse and _block_always_terminates(stmt.body) and _block_always_terminates(stmt.orelse):
+            return True
+    return False
+
+def _block_always_terminates(body: List[ast.stmt]) -> bool:
+    for s in body:
+        if _stmt_always_terminates(s):
+            return True
+    return False
+
+class DeadCodeFinder(ast.NodeVisitor):
+    """Identifies lines of code that are unreachable due to prior unconditional returns/raises/breaks."""
+
+    def __init__(self) -> None:
+        self.dead_lines: Set[int] = set()
+
+    def _check_block(self, body: List[ast.stmt]) -> None:
+        terminated = False
+        for stmt in body:
+            if terminated:
+                lineno = getattr(stmt, "lineno", None)
+                if lineno:
+                    self.dead_lines.add(lineno)
+                for child in ast.walk(stmt):
+                    child_lineno = getattr(child, "lineno", None)
+                    if child_lineno:
+                        self.dead_lines.add(child_lineno)
+            if _stmt_always_terminates(stmt):
+                terminated = True
+            self.visit(stmt)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._check_block(node.body)
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._check_block(node.body)
+        self.generic_visit(node)
+
+    def visit_If(self, node: ast.If) -> None:
+        if isinstance(node.test, ast.Constant) and node.test.value is False:
+            for s in node.body:
+                if hasattr(s, "lineno"):
+                    self.dead_lines.add(s.lineno)
+                for c in ast.walk(s):
+                    if hasattr(c, "lineno"):
+                        self.dead_lines.add(c.lineno)
+        else:
+            self._check_block(node.body)
+        if isinstance(node.test, ast.Constant) and node.test.value is True:
+            for s in node.orelse:
+                if hasattr(s, "lineno"):
+                    self.dead_lines.add(s.lineno)
+                for c in ast.walk(s):
+                    if hasattr(c, "lineno"):
+                        self.dead_lines.add(c.lineno)
+        else:
+            self._check_block(node.orelse)
+
+    def visit_For(self, node: ast.For) -> None:
+        self._check_block(node.body)
+        self._check_block(node.orelse)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        self._check_block(node.body)
+        self._check_block(node.orelse)
+
+    def visit_While(self, node: ast.While) -> None:
+        if isinstance(node.test, ast.Constant) and node.test.value is False:
+            for s in node.body:
+                if hasattr(s, "lineno"):
+                    self.dead_lines.add(s.lineno)
+                for c in ast.walk(s):
+                    if hasattr(c, "lineno"):
+                        self.dead_lines.add(c.lineno)
+        else:
+            self._check_block(node.body)
+        self._check_block(node.orelse)
+
+    def visit_Try(self, node: ast.Try) -> None:
+        self._check_block(node.body)
+        for h in node.handlers:
+            self._check_block(h.body)
+        self._check_block(node.orelse)
+        self._check_block(node.finalbody)
+
+    def visit_With(self, node: ast.With) -> None:
+        self._check_block(node.body)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._check_block(node.body)
+
+
+def is_algebraic_zero_identity(node: ast.AST) -> bool:
+    """Check if binary operator is adding or subtracting 0 (e.g. x + 0 == x - 0)."""
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, (ast.Add, ast.Sub)):
+            if isinstance(node.right, ast.Constant) and node.right.value == 0 and not isinstance(node.right.value, bool):
+                return True
+            if isinstance(node.left, ast.Constant) and node.left.value == 0 and not isinstance(node.left.value, bool) and isinstance(node.op, ast.Add):
+                return True
+    return False
+
+
+def is_range_zero_start(node: ast.AST) -> bool:
+    """Check if range call starts at 0 (range(0, N) == range(N))."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "range":
+        if len(node.args) == 2 and isinstance(node.args[0], ast.Constant) and node.args[0].value == 0 and not isinstance(node.args[0].value, bool):
+            return True
+    return False
+
+
+class EquivalentMutantCollector(ast.NodeVisitor):
+    """Collects equivalent / unkillable mutant locations for reporting and pruning."""
+
+    def __init__(self, file_path: Path, lines: List[str], dead_lines: Set[int], line_ranges: Optional[Set[int]] = None) -> None:
+        self.file_path = file_path
+        self.lines = lines
+        self.dead_lines = dead_lines
+        self.line_ranges = line_ranges
+        self.pruned: List[PrunedEquivalentMutant] = []
+
+    def _should_include(self, lineno: int) -> bool:
+        if self.line_ranges is not None and lineno not in self.line_ranges:
+            return False
+        return True
+
+    def visit_BinOp(self, node: ast.BinOp) -> None:
+        lineno = getattr(node, "lineno", 1)
+        if self._should_include(lineno) and is_algebraic_zero_identity(node):
+            raw_line = self.lines[lineno - 1].strip() if 0 <= lineno - 1 < len(self.lines) else ""
+            self.pruned.append(PrunedEquivalentMutant(
+                file_path=self.file_path,
+                line_number=lineno,
+                category="Algebraic Identity",
+                description="Arithmetic zero identity (x + 0 == x - 0)",
+                original_line=raw_line,
+            ))
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        lineno = getattr(node, "lineno", 1)
+        if self._should_include(lineno):
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "get" and len(node.args) == 2:
+                if isinstance(node.args[1], ast.Constant) and node.args[1].value is None:
+                    raw_line = self.lines[lineno - 1].strip() if 0 <= lineno - 1 < len(self.lines) else ""
+                    self.pruned.append(PrunedEquivalentMutant(
+                        file_path=self.file_path,
+                        line_number=lineno,
+                        category="Defensive Redundancy",
+                        description="dict.get() None default fallback (d.get(k, None) == d.get(k))",
+                        original_line=raw_line,
+                    ))
+            elif is_range_zero_start(node):
+                raw_line = self.lines[lineno - 1].strip() if 0 <= lineno - 1 < len(self.lines) else ""
+                self.pruned.append(PrunedEquivalentMutant(
+                    file_path=self.file_path,
+                    line_number=lineno,
+                    category="Redundant Range Boundary",
+                    description="Range zero start index (range(0, N) == range(N))",
+                    original_line=raw_line,
+                ))
+        self.generic_visit(node)
+
+
+def collect_equivalent_mutants_for_file(
+    file_path: Path,
+    line_ranges: Optional[Set[int]] = None,
+) -> List[PrunedEquivalentMutant]:
+    """Scans a file for equivalent mutants, dead code, and redundant constructs."""
+    try:
+        source = file_path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(source)
+    except Exception:
+        return []
+
+    lines = source.splitlines()
+    finder = DeadCodeFinder()
+    finder.visit(tree)
+
+    collector = EquivalentMutantCollector(file_path, lines, finder.dead_lines, line_ranges=line_ranges)
+    collector.visit(tree)
+
+    seen_dead_lines = set()
+    for dl in sorted(list(finder.dead_lines)):
+        if line_ranges is not None and dl not in line_ranges:
+            continue
+        if dl in seen_dead_lines:
+            continue
+        seen_dead_lines.add(dl)
+        raw_line = lines[dl - 1].strip() if 0 <= dl - 1 < len(lines) else ""
+        if raw_line and not raw_line.startswith("#"):
+            collector.pruned.append(PrunedEquivalentMutant(
+                file_path=file_path,
+                line_number=dl,
+                category="Dead Code / Unreachable",
+                description="Code statement placed after unconditional terminating control flow",
+                original_line=raw_line,
+            ))
+
+    return collector.pruned
+
+
 class MutationCounter(ast.NodeVisitor):
     """Count number of mutable locations in an AST, excluding type annotations."""
 
     def __init__(self) -> None:
         self.count = 0
 
+    def visit_Module(self, node: ast.Module) -> None:
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                continue
+            self.visit(stmt)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.count += len(node.decorator_list)
+        for b in node.bases:
+            self.visit(b)
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                continue
+            self.visit(stmt)
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        for d in node.decorator_list:
-            self.visit(d)
+        if _is_overload_def(node):
+            return
+        self.count += len(node.decorator_list)
         for default in node.args.defaults:
             if default:
                 self.visit(default)
         for kw_default in node.args.kw_defaults:
             if kw_default:
                 self.visit(kw_default)
-        for stmt in node.body:
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                continue
             self.visit(stmt)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        for d in node.decorator_list:
-            self.visit(d)
+        if _is_overload_def(node):
+            return
+        self.count += len(node.decorator_list)
         for default in node.args.defaults:
             if default:
                 self.visit(default)
         for kw_default in node.args.kw_defaults:
             if kw_default:
                 self.visit(kw_default)
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                continue
+            self.visit(stmt)
+
+    def visit_With(self, node: ast.With) -> None:
+        if all(item.optional_vars is None for item in node.items):
+            self.count += 1
         for stmt in node.body:
             self.visit(stmt)
 
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        if all(item.optional_vars is None for item in node.items):
+            self.count += 1
+        for stmt in node.body:
+            self.visit(stmt)
+
+    def visit_For(self, node: ast.For) -> None:
+        if not (isinstance(node.iter, ast.List) and len(node.iter.elts) == 0):
+            self.count += 1
+        self.generic_visit(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
+        if not (isinstance(node.iter, ast.List) and len(node.iter.elts) == 0):
+            self.count += 1
+        self.generic_visit(node)
+
+    def visit_If(self, node: ast.If) -> None:
+        if _is_type_checking_guard(node):
+            return
+        self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if isinstance(node.type, ast.Name) and node.type.id in EXCEPT_MAP:
+            self.count += 1
+        self.generic_visit(node)
+
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        self.visit(node.target)
+        node_target = getattr(node, 'target', None)
+        if node_target:
+            self.visit(node_target)
         if node.value:
             self.visit(node.value)
 
     def visit_arg(self, node: ast.arg) -> None:
         pass
 
+    def visit_Await(self, node: ast.Await) -> None:
+        self.count += 1
+        self.generic_visit(node)
+
+    def visit_Break(self, node: ast.Break) -> None:
+        self.count += 1
+
+    def visit_Continue(self, node: ast.Continue) -> None:
+        self.count += 1
+
     def visit_Call(self, node: ast.Call) -> None:
         if is_log_or_print_call(node):
             return
+        if isinstance(node.func, ast.Attribute) and node.func.attr in STRING_METHOD_SWAP:
+            self.count += 1
+        elif isinstance(node.func, ast.Attribute) and node.func.attr == "get" and len(node.args) == 2 and not _is_none_constant(node.args[1]):
+            self.count += 1
+        elif len(node.args) == 2 and not _is_special_builtin_call(node):
+            self.count += 1
+        self.generic_visit(node)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> None:
+        if type(node.op) in UNARYOP_MAP or isinstance(node.op, (ast.Not, ast.Invert)):
+            self.count += 1
+        self.generic_visit(node)
+
+    def visit_Return(self, node: ast.Return) -> None:
+        if not _is_none_constant(node.value):
+            self.count += 1
+            self.visit(node.value)
+
+    def visit_Assert(self, node: ast.Assert) -> None:
+        self.count += 1
+        self.generic_visit(node)
+
+    def visit_Expr(self, node: ast.Expr) -> None:
+        if isinstance(node.value, ast.Call) and not is_log_or_print_call(node.value):
+            self.count += 1
         self.generic_visit(node)
 
     def visit_Raise(self, node: ast.Raise) -> None:
+        self.count += 1
         if isinstance(node.exc, ast.Call):
             for arg in node.exc.args:
                 if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)) and (not (isinstance(arg, ast.BinOp) and isinstance(arg.op, (ast.Add, ast.Mod)))):
@@ -376,10 +782,49 @@ class MutationCounter(ast.NodeVisitor):
             self.count += 1
         self.generic_visit(node)
 
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self.count += 1
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id == "deepcopy":
+            self.count += 1
+        self.generic_visit(node)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:
+        self.count += 1
+        self.generic_visit(node)
+
+    def visit_comprehension(self, node: ast.comprehension) -> None:
+        if node.ifs:
+            self.count += len(node.ifs)
+        self.generic_visit(node)
+
+    def visit_Yield(self, node: ast.Yield) -> None:
+        self.count += 1
+        self.generic_visit(node)
+
+    def visit_YieldFrom(self, node: ast.YieldFrom) -> None:
+        self.count += 1
+        self.generic_visit(node)
+
+    def visit_Match(self, node: ast.Match) -> None:
+        if len(node.cases) > 1:
+            self.count += len(node.cases)
+        for case in node.cases:
+            if case.guard:
+                self.count += 1
+        self.generic_visit(node)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        self.generic_visit(node)
+
     def visit_Constant(self, node: ast.Constant) -> None:
         if isinstance(node.value, bool):
             self.count += 1
         elif isinstance(node.value, (int, float)) and (not isinstance(node.value, bool)):
+            self.count += 1
+        elif isinstance(node.value, str) and not _is_docstring_or_directive(node):
             self.count += 1
         self.generic_visit(node)
 
@@ -391,22 +836,174 @@ class MutationTransformer(ast.NodeTransformer):
         self.current_index = 0
         self.applied_info: Optional[Tuple[int, str, str, str]] = None
 
+    def visit_Module(self, node: ast.Module) -> ast.AST:
+        new_body = []
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                new_body.append(stmt)
+            else:
+                new_body.append(self.visit(stmt))
+        node.body = new_body
+        return node
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
+        for d_idx, d in enumerate(list(node.decorator_list)):
+            if self.current_index == self.target_index:
+                lineno = getattr(d, 'lineno', getattr(node, 'lineno', 1))
+                dec_name = getattr(d, 'id', getattr(getattr(d, 'func', None), 'id', 'decorator'))
+                self.applied_info = (lineno, f"Remove class decorator @{dec_name}", f"@{dec_name}", "", None, None)
+                node.decorator_list = [dec for i, dec in enumerate(node.decorator_list) if i != d_idx]
+                self.current_index += 1
+                break
+            self.current_index += 1
+        node.bases = [self.visit(b) for b in node.bases]
+        new_body = []
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                new_body.append(stmt)
+            else:
+                res = self.visit(stmt)
+                if isinstance(res, list):
+                    new_body.extend(res)
+                elif res is not None:
+                    new_body.append(res)
+        node.body = new_body
+        return node
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
-        node.decorator_list = [self.visit(d) for d in node.decorator_list]
+        if _is_overload_def(node):
+            return node
+        for d_idx, d in enumerate(list(node.decorator_list)):
+            if self.current_index == self.target_index:
+                lineno = getattr(d, 'lineno', getattr(node, 'lineno', 1))
+                dec_name = getattr(d, 'id', getattr(getattr(d, 'func', None), 'id', 'decorator'))
+                self.applied_info = (lineno, f"Remove function decorator @{dec_name}", f"@{dec_name}", "", None, None)
+                node.decorator_list = [dec for i, dec in enumerate(node.decorator_list) if i != d_idx]
+                self.current_index += 1
+                break
+            self.current_index += 1
         node.args.defaults = [self.visit(d) if d else None for d in node.args.defaults]
         node.args.kw_defaults = [self.visit(d) if d else None for d in node.args.kw_defaults]
-        node.body = [self.visit(stmt) for stmt in node.body]
+        new_body = []
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                new_body.append(stmt)
+            else:
+                res = self.visit(stmt)
+                if isinstance(res, list):
+                    new_body.extend(res)
+                elif res is not None:
+                    new_body.append(res)
+        node.body = new_body
         return node
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
-        node.decorator_list = [self.visit(d) for d in node.decorator_list]
+        if _is_overload_def(node):
+            return node
+        for d_idx, d in enumerate(list(node.decorator_list)):
+            if self.current_index == self.target_index:
+                lineno = getattr(d, 'lineno', getattr(node, 'lineno', 1))
+                dec_name = getattr(d, 'id', getattr(getattr(d, 'func', None), 'id', 'decorator'))
+                self.applied_info = (lineno, f"Remove async function decorator @{dec_name}", f"@{dec_name}", "", None, None)
+                node.decorator_list = [dec for i, dec in enumerate(node.decorator_list) if i != d_idx]
+                self.current_index += 1
+                break
+            self.current_index += 1
         node.args.defaults = [self.visit(d) if d else None for d in node.args.defaults]
         node.args.kw_defaults = [self.visit(d) if d else None for d in node.args.kw_defaults]
-        node.body = [self.visit(stmt) for stmt in node.body]
+        new_body = []
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                new_body.append(stmt)
+            else:
+                res = self.visit(stmt)
+                if isinstance(res, list):
+                    new_body.extend(res)
+                elif res is not None:
+                    new_body.append(res)
+        node.body = new_body
         return node
 
+    def visit_With(self, node: ast.With) -> Any:
+        if all(item.optional_vars is None for item in node.items):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Bypass context manager (execute inner block without context)", "with ctx:", "bare body", None, None)
+                self.current_index += 1
+                return [self.visit(stmt) for stmt in node.body]
+            self.current_index += 1
+        new_body = []
+        for stmt in node.body:
+            res = self.visit(stmt)
+            if isinstance(res, list):
+                new_body.extend(res)
+            elif res is not None:
+                new_body.append(res)
+        node.body = new_body
+        return node
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> Any:
+        if all(item.optional_vars is None for item in node.items):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Bypass async context manager (execute inner block without context)", "async with ctx:", "bare body", None, None)
+                self.current_index += 1
+                return [self.visit(stmt) for stmt in node.body]
+            self.current_index += 1
+        new_body = []
+        for stmt in node.body:
+            res = self.visit(stmt)
+            if isinstance(res, list):
+                new_body.extend(res)
+            elif res is not None:
+                new_body.append(res)
+        node.body = new_body
+        return node
+
+    def visit_If(self, node: ast.If) -> ast.AST:
+        if _is_type_checking_guard(node):
+            return node
+        return self.generic_visit(node)
+
+    def visit_For(self, node: ast.For) -> ast.AST:
+        if not (isinstance(node.iter, ast.List) and len(node.iter.elts) == 0):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Empty for-loop iterator (Zero-Iteration Loop)", "for ... in iter:", "for ... in []:", None, None)
+                node.iter = ast.List(elts=[], ctx=ast.Load())
+                self.current_index += 1
+                return node
+            self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> ast.AST:
+        if not (isinstance(node.iter, ast.List) and len(node.iter.elts) == 0):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Empty async for-loop iterator (Zero-Iteration Loop)", "async for ... in iter:", "async for ... in []:", None, None)
+                node.iter = ast.List(elts=[], ctx=ast.Load())
+                self.current_index += 1
+                return node
+            self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> ast.AST:
+        if isinstance(node.type, ast.Name) and node.type.id in EXCEPT_MAP:
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                old_exc = node.type.id
+                new_exc = EXCEPT_MAP[old_exc]
+                self.applied_info = (lineno, f"Replace exception catch type '{old_exc}' with '{new_exc}'", old_exc, new_exc, None, None)
+                node.type = ast.Name(id=new_exc, ctx=ast.Load())
+                self.current_index += 1
+                return node
+            self.current_index += 1
+        return self.generic_visit(node)
+
     def visit_AnnAssign(self, node: ast.AnnAssign) -> ast.AST:
-        node.target = self.visit(node.target)
+        node_target = getattr(node, 'target', None)
+        if node_target:
+            node.target = self.visit(node_target)
         if node.value:
             node.value = self.visit(node.value)
         return node
@@ -414,12 +1011,128 @@ class MutationTransformer(ast.NodeTransformer):
     def visit_arg(self, node: ast.arg) -> ast.AST:
         return node
 
+    def visit_Await(self, node: ast.Await) -> ast.AST:
+        if self.current_index == self.target_index:
+            lineno = getattr(node, 'lineno', 1)
+            self.applied_info = (lineno, "Drop await expression (coroutine left unawaited)", "await", "", None, None)
+            self.current_index += 1
+            return self.visit(node.value)
+        self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_Break(self, node: ast.Break) -> ast.AST:
+        if self.current_index == self.target_index:
+            lineno = getattr(node, 'lineno', 1)
+            self.applied_info = (lineno, "Replace 'break' loop control with 'continue'", "break", "continue", None, None)
+            self.current_index += 1
+            return ast.copy_location(ast.Continue(), node)
+        self.current_index += 1
+        return node
+
+    def visit_Continue(self, node: ast.Continue) -> ast.AST:
+        if self.current_index == self.target_index:
+            lineno = getattr(node, 'lineno', 1)
+            self.applied_info = (lineno, "Replace 'continue' loop control with 'break'", "continue", "break", None, None)
+            self.current_index += 1
+            return ast.copy_location(ast.Break(), node)
+        self.current_index += 1
+        return node
+
     def visit_Call(self, node: ast.Call) -> ast.AST:
         if is_log_or_print_call(node):
             return node
+        if isinstance(node.func, ast.Attribute) and node.func.attr in STRING_METHOD_SWAP:
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                old_m = node.func.attr
+                new_m = STRING_METHOD_SWAP[old_m]
+                self.applied_info = (lineno, f"Swap string method '{old_m}' with '{new_m}'", old_m, new_m, None, None)
+                node.func.attr = new_m
+                self.current_index += 1
+                return node
+            self.current_index += 1
+        elif isinstance(node.func, ast.Attribute) and node.func.attr == "get" and len(node.args) == 2 and not _is_none_constant(node.args[1]):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Remove dictionary .get() default fallback (replace with None)", "get(k, default)", "get(k, None)", None, None)
+                node.args[1] = ast.Constant(value=None)
+                self.current_index += 1
+                return node
+            self.current_index += 1
+        elif len(node.args) == 2 and not _is_special_builtin_call(node):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Swap 2 positional arguments in function call", "func(a, b)", "func(b, a)", None, None)
+                node.args = [node.args[1], node.args[0]]
+                self.current_index += 1
+                return node
+            self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
+        self.generic_visit(node)
+        op_type = type(node.op)
+        if op_type in UNARYOP_MAP:
+            if self.current_index == self.target_index:
+                new_cls, old_s, new_s = UNARYOP_MAP[op_type]
+                node.op = new_cls()
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, f"Replace unary operator '{old_s}' with '{new_s}'", old_s, new_s, None, None)
+            self.current_index += 1
+        elif isinstance(node.op, ast.Not):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Remove 'not' logical inversion", "not x", "x", None, None)
+                self.current_index += 1
+                return node.operand
+            self.current_index += 1
+        elif isinstance(node.op, ast.Invert):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Remove '~' bitwise inversion", "~x", "x", None, None)
+                self.current_index += 1
+                return node.operand
+            self.current_index += 1
+        return node
+
+    def visit_Return(self, node: ast.Return) -> ast.AST:
+        if not _is_none_constant(node.value):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Replace return value with None (statement mutation)", "return", "return None", None, None)
+                node.value = ast.Constant(value=None)
+                self.current_index += 1
+                return node
+            self.current_index += 1
+            node.value = self.visit(node.value)
+        return node
+
+    def visit_Assert(self, node: ast.Assert) -> ast.AST:
+        if self.current_index == self.target_index:
+            lineno = getattr(node, 'lineno', 1)
+            self.applied_info = (lineno, "Delete assert statement / replace with pass", "assert", "pass", None, None)
+            self.current_index += 1
+            return ast.copy_location(ast.Pass(), node)
+        self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_Expr(self, node: ast.Expr) -> ast.AST:
+        if isinstance(node.value, ast.Call) and not is_log_or_print_call(node.value):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Delete side-effect call statement / replace with pass", "call", "pass", None, None)
+                self.current_index += 1
+                return ast.copy_location(ast.Pass(), node)
+            self.current_index += 1
         return self.generic_visit(node)
 
     def visit_Raise(self, node: ast.Raise) -> ast.AST:
+        if self.current_index == self.target_index:
+            lineno = getattr(node, 'lineno', 1)
+            self.applied_info = (lineno, "Delete raise statement / replace with pass", "raise", "pass", None, None)
+            self.current_index += 1
+            return ast.copy_location(ast.Pass(), node)
+        self.current_index += 1
         if isinstance(node.exc, ast.Call):
             new_args = []
             for arg in node.exc.args:
@@ -512,7 +1225,117 @@ class MutationTransformer(ast.NodeTransformer):
                 node.value = new_num
                 self.applied_info = (lineno, f"Replace numeric constant '{old_num}' with '{new_num}'", str(old_num), str(new_num), col_offset, end_col_offset)
             self.current_index += 1
+        elif isinstance(node.value, str) and not _is_docstring_or_directive(node):
+            if self.current_index == self.target_index:
+                old_str = node.value
+                new_str = f"XX{old_str}XX" if old_str else "XX"
+                node.value = new_str
+                self.applied_info = (lineno, f"Mutate string literal '{old_str[:15]}' to '{new_str[:15]}'", old_str, new_str, col_offset, end_col_offset)
+            self.current_index += 1
         return node
+
+    def visit_Lambda(self, node: ast.Lambda) -> ast.AST:
+        if self.current_index == self.target_index:
+            lineno = getattr(node, 'lineno', 1)
+            if _is_none_constant(node.body):
+                self.applied_info = (lineno, "Mutate lambda body from 'None' to '0'", "None", "0", None, None)
+                node.body = ast.Constant(value=0)
+            else:
+                self.applied_info = (lineno, "Mutate lambda body to return 'None'", "body", "None", None, None)
+                node.body = ast.Constant(value=None)
+            self.current_index += 1
+            return node
+        self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> ast.AST:
+        if node.id == "deepcopy":
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Replace 'deepcopy' with shallow 'copy'", "deepcopy", "copy", None, None)
+                node.id = "copy"
+                self.current_index += 1
+                return node
+            self.current_index += 1
+        return node
+
+    def visit_IfExp(self, node: ast.IfExp) -> ast.AST:
+        if self.current_index == self.target_index:
+            lineno = getattr(node, 'lineno', 1)
+            self.applied_info = (lineno, "Swap ternary if-else branches", "a if cond else b", "b if cond else a", None, None)
+            node.body, node.orelse = node.orelse, node.body
+            self.current_index += 1
+            return node
+        self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_comprehension(self, node: ast.comprehension) -> ast.AST:
+        if node.ifs:
+            for if_idx, if_expr in enumerate(list(node.ifs)):
+                if self.current_index == self.target_index:
+                    lineno = getattr(if_expr, 'lineno', 1)
+                    self.applied_info = (lineno, "Invert comprehension 'if' filter condition", "if cond", "if not (cond)", None, None)
+                    node.ifs[if_idx] = ast.UnaryOp(op=ast.Not(), operand=if_expr)
+                    self.current_index += 1
+                    return node
+                self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_Yield(self, node: ast.Yield) -> ast.AST:
+        if node.value and not _is_none_constant(node.value):
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Mutate yield expression to 'yield None'", "yield expr", "yield None", None, None)
+                node.value = ast.Constant(value=None)
+                self.current_index += 1
+                return node
+            self.current_index += 1
+            node.value = self.visit(node.value)
+            return node
+        elif not node.value:
+            if self.current_index == self.target_index:
+                lineno = getattr(node, 'lineno', 1)
+                self.applied_info = (lineno, "Mutate bare yield to 'yield 0'", "yield", "yield 0", None, None)
+                node.value = ast.Constant(value=0)
+                self.current_index += 1
+                return node
+            self.current_index += 1
+            return node
+        return self.generic_visit(node)
+
+    def visit_YieldFrom(self, node: ast.YieldFrom) -> ast.AST:
+        if self.current_index == self.target_index:
+            lineno = getattr(node, 'lineno', 1)
+            self.applied_info = (lineno, "Replace 'yield from' iterator with empty list", "yield from expr", "yield from []", None, None)
+            node.value = ast.List(elts=[], ctx=ast.Load())
+            self.current_index += 1
+            return node
+        self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_Match(self, node: ast.Match) -> ast.AST:
+        if len(node.cases) > 1:
+            for c_idx in range(len(node.cases)):
+                if self.current_index == self.target_index:
+                    lineno = getattr(node, 'lineno', 1)
+                    self.applied_info = (lineno, "Drop pattern matching branch case", "case ...:", "/* dropped case */", None, None)
+                    node.cases = [c for i, c in enumerate(node.cases) if i != c_idx]
+                    self.current_index += 1
+                    return node
+                self.current_index += 1
+        for case in node.cases:
+            if case.guard:
+                if self.current_index == self.target_index:
+                    lineno = getattr(case, 'lineno', 1)
+                    self.applied_info = (lineno, "Invert pattern matching case guard condition", "if guard", "if not (guard)", None, None)
+                    case.guard = ast.UnaryOp(op=ast.Not(), operand=case.guard)
+                    self.current_index += 1
+                    return node
+                self.current_index += 1
+        return self.generic_visit(node)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> ast.AST:
+        return self.generic_visit(node)
 
 def parse_pytest_summary(output: str) -> Dict[str, Any]:
     """
@@ -535,6 +1358,10 @@ def parse_pytest_summary(output: str) -> Dict[str, Any]:
 
 def extract_collection_error(output: str, returncode: int) -> str:
     """Extract a concise and informative error message from pytest collection / startup failure."""
+    out_lower = output.lower()
+    if "no module named 'pytest'" in out_lower or "no module named pytest" in out_lower:
+        return "Pytest is not installed in the active Python environment (install with: pip install pytest)"
+
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     err_msgs: List[str] = []
     for line in lines:
@@ -609,6 +1436,19 @@ def generate_mutants_for_file(file_path: Path, line_ranges: Optional[Set[int]] =
     except SyntaxError:
         return []
     lines = source.splitlines()
+
+    # Collect pragma-suppressed lines (# pragma: no mutate, # mutmut: disable, etc.)
+    pragma_suppressed_lines: Set[int] = set()
+    for l_idx, line_str in enumerate(lines, start=1):
+        if '#' in line_str:
+            comment_part = line_str.split('#', 1)[1].lower()
+            if any(p in comment_part for p in ['pragma: no mutate', 'pragma: no-mutate', 'mutmut: disable', 'cosmic-ray: disable']):
+                pragma_suppressed_lines.add(l_idx)
+
+    finder = DeadCodeFinder()
+    finder.visit(tree)
+    dead_lines = finder.dead_lines
+
     counter = MutationCounter()
     counter.visit(tree)
     total_locations = counter.count
@@ -623,6 +1463,8 @@ def generate_mutants_for_file(file_path: Path, line_ranges: Optional[Set[int]] =
         except Exception:
             continue
         lineno = transformer.applied_info[0] if transformer.applied_info else 1
+        if lineno in pragma_suppressed_lines or lineno in dead_lines:
+            continue
         if line_ranges is not None and lineno not in line_ranges:
             continue
         desc = transformer.applied_info[1] if transformer.applied_info else f'Mutation #{idx + 1}'
@@ -652,6 +1494,315 @@ def generate_mutants_for_file(file_path: Path, line_ranges: Optional[Set[int]] =
         mutant_id = f'{file_path.name}:{lineno}:mutant_{idx + 1}'
         mutants.append(Mutant(mutant_id=mutant_id, file_path=file_path, line_number=lineno, description=desc, original_line=orig_line, mutated_line=mut_line, mutated_source=mutated_source))
     return mutants
+
+
+class MutationSchemataTransformer(ast.NodeTransformer):
+    """
+    Transforms a Python AST into an in-memory mutant schemata module where each mutant
+    is conditioned on a dynamic runtime switch `_dp_m(switch_idx)`.
+    """
+    def __init__(
+        self,
+        pragma_suppressed_lines: Set[int],
+        dead_lines: Optional[Set[int]] = None,
+        line_ranges: Optional[Set[int]] = None,
+    ) -> None:
+        self.pragma_suppressed = pragma_suppressed_lines
+        self.dead_lines = dead_lines or set()
+        self.line_ranges = line_ranges
+        self.current_switch = 0
+        self.mutant_records: List[Tuple[int, int, str, str, str, Optional[int], Optional[int]]] = []
+
+    def _dp_check(self, mid: int) -> ast.Call:
+        return ast.Call(
+            func=ast.Name(id="_dp_m", ctx=ast.Load()),
+            args=[ast.Constant(value=mid)],
+            keywords=[],
+        )
+
+    def _wrap_ifexp(
+        self,
+        original_node: ast.expr,
+        mutated_node: ast.expr,
+        lineno: int,
+        desc: str,
+        old_val: str,
+        new_val: str,
+        col_offset: Optional[int] = None,
+        end_col_offset: Optional[int] = None,
+    ) -> ast.expr:
+        if lineno in self.pragma_suppressed or lineno in self.dead_lines or (self.line_ranges is not None and lineno not in self.line_ranges):
+            return original_node
+        self.current_switch += 1
+        mid = self.current_switch
+        self.mutant_records.append((mid, lineno, desc, old_val, new_val, col_offset, end_col_offset))
+        return ast.IfExp(
+            test=self._dp_check(mid),
+            body=mutated_node,
+            orelse=original_node,
+        )
+
+    def visit_Module(self, node: ast.Module) -> ast.AST:
+        new_body = []
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                new_body.append(stmt)
+            else:
+                new_body.append(self.visit(stmt))
+        node.body = new_body
+        return node
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
+        node.bases = [self.visit(b) for b in node.bases]
+        new_body = []
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                new_body.append(stmt)
+            else:
+                res = self.visit(stmt)
+                if isinstance(res, list):
+                    new_body.extend(res)
+                elif res is not None:
+                    new_body.append(res)
+        node.body = new_body
+        return node
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
+        if _is_overload_def(node):
+            return node
+        node.args.defaults = [self.visit(d) if d else None for d in node.args.defaults]
+        node.args.kw_defaults = [self.visit(d) if d else None for d in node.args.kw_defaults]
+        new_body = []
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                new_body.append(stmt)
+            else:
+                res = self.visit(stmt)
+                if isinstance(res, list):
+                    new_body.extend(res)
+                elif res is not None:
+                    new_body.append(res)
+        node.body = new_body
+        return node
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
+        if _is_overload_def(node):
+            return node
+        node.args.defaults = [self.visit(d) if d else None for d in node.args.defaults]
+        node.args.kw_defaults = [self.visit(d) if d else None for d in node.args.kw_defaults]
+        new_body = []
+        for idx, stmt in enumerate(node.body):
+            if idx == 0 and _is_docstring_expr(stmt):
+                new_body.append(stmt)
+            else:
+                res = self.visit(stmt)
+                if isinstance(res, list):
+                    new_body.extend(res)
+                elif res is not None:
+                    new_body.append(res)
+        node.body = new_body
+        return node
+
+    def visit_Return(self, node: ast.Return) -> ast.AST:
+        if not _is_none_constant(node.value):
+            v_val = self.visit(node.value) if node.value is not None else ast.Constant(value=None)
+            lineno = getattr(node, "lineno", 1)
+            mut_val = ast.Constant(value=None)
+            desc = "Replace return value with None (statement mutation)"
+            wrapped_val = self._wrap_ifexp(v_val, mut_val, lineno, desc, "return", "return None")
+            return ast.Return(value=wrapped_val)
+        return node
+
+    def visit_Compare(self, node: ast.Compare) -> ast.AST:
+        v_left = self.visit(node.left)
+        v_comparators = [self.visit(c) for c in node.comparators]
+        orig_compare = ast.Compare(left=v_left, ops=node.ops, comparators=v_comparators)
+        if len(node.ops) == 1 and type(node.ops[0]) in COMPARE_MAP:
+            lineno = getattr(node, "lineno", 1)
+            mut_op_cls, old_op_str, new_op_str = COMPARE_MAP[type(node.ops[0])]
+            mut_compare = ast.Compare(left=v_left, ops=[mut_op_cls()], comparators=v_comparators)
+            desc = f"Replace comparison '{old_op_str}' with '{new_op_str}'"
+            return self._wrap_ifexp(orig_compare, mut_compare, lineno, desc, old_op_str, new_op_str)
+        return orig_compare
+
+    def visit_BinOp(self, node: ast.BinOp) -> ast.AST:
+        v_left = self.visit(node.left)
+        v_right = self.visit(node.right)
+        orig_binop = ast.BinOp(left=v_left, op=node.op, right=v_right)
+        if type(node.op) in BINOP_MAP and not is_algebraic_zero_identity(node):
+            lineno = getattr(node, "lineno", 1)
+            mut_op_cls, old_op_str, new_op_str = BINOP_MAP[type(node.op)]
+            mut_binop = ast.BinOp(left=v_left, op=mut_op_cls(), right=v_right)
+            desc = f"Replace binary operator '{old_op_str}' with '{new_op_str}'"
+            return self._wrap_ifexp(orig_binop, mut_binop, lineno, desc, old_op_str, new_op_str)
+        return orig_binop
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> ast.AST:
+        v_values = [self.visit(v) for v in node.values]
+        orig_boolop = ast.BoolOp(op=node.op, values=v_values)
+        if type(node.op) in BOOLOP_MAP:
+            lineno = getattr(node, "lineno", 1)
+            mut_op_cls, old_op_str, new_op_str = BOOLOP_MAP[type(node.op)]
+            mut_boolop = ast.BoolOp(op=mut_op_cls(), values=v_values)
+            desc = f"Replace logical operator '{old_op_str}' with '{new_op_str}'"
+            return self._wrap_ifexp(orig_boolop, mut_boolop, lineno, desc, old_op_str, new_op_str)
+        return orig_boolop
+
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> ast.AST:
+        v_operand = self.visit(node.operand)
+        lineno = getattr(node, "lineno", 1)
+        orig_unary = ast.UnaryOp(op=node.op, operand=v_operand)
+        if isinstance(node.op, ast.Not):
+            desc = "Invert boolean negation (remove 'not')"
+            return self._wrap_ifexp(orig_unary, v_operand, lineno, desc, "not", "")
+        elif type(node.op) in UNARYOP_MAP:
+            mut_op_cls, old_op_str, new_op_str = UNARYOP_MAP[type(node.op)]
+            mut_unary = ast.UnaryOp(op=mut_op_cls(), operand=v_operand)
+            desc = f"Replace unary operator '{old_op_str}' with '{new_op_str}'"
+            return self._wrap_ifexp(orig_unary, mut_unary, lineno, desc, old_op_str, new_op_str)
+        return orig_unary
+
+    def visit_Constant(self, node: ast.Constant) -> ast.AST:
+        lineno = getattr(node, "lineno", 1)
+        col_offset = getattr(node, "col_offset", None)
+        end_col_offset = getattr(node, "end_col_offset", None)
+        if isinstance(node.value, bool):
+            old_val = node.value
+            new_val = not node.value
+            mut_node = ast.Constant(value=new_val)
+            desc = f"Replace boolean literal '{old_val}' with '{new_val}'"
+            return self._wrap_ifexp(node, mut_node, lineno, desc, str(old_val), str(new_val), col_offset, end_col_offset)
+        elif isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
+            old_num = node.value
+            new_num = old_num + 1 if old_num != 0 else 1
+            mut_node = ast.Constant(value=new_num)
+            desc = f"Replace numeric constant '{old_num}' with '{new_num}'"
+            return self._wrap_ifexp(node, mut_node, lineno, desc, str(old_num), str(new_num), col_offset, end_col_offset)
+        elif isinstance(node.value, str) and not _is_docstring_or_directive(node):
+            old_str = node.value
+            new_str = f"XX{old_str}XX" if old_str else "XX"
+            mut_node = ast.Constant(value=new_str)
+            desc = f"Mutate string literal '{old_str[:15]}' to '{new_str[:15]}'"
+            return self._wrap_ifexp(node, mut_node, lineno, desc, old_str, new_str, col_offset, end_col_offset)
+        return node
+
+    def visit_Call(self, node: ast.Call) -> ast.AST:
+        if is_log_or_print_call(node):
+            return node
+        lineno = getattr(node, "lineno", 1)
+        v_func = self.visit(node.func)
+        v_args = [self.visit(a) for a in node.args]
+        v_kws = [ast.keyword(arg=kw.arg, value=self.visit(kw.value)) for kw in node.keywords]
+        orig_call = ast.Call(func=v_func, args=v_args, keywords=v_kws)
+
+        if isinstance(node.func, ast.Attribute) and node.func.attr in STRING_METHOD_SWAP:
+            old_attr = node.func.attr
+            new_attr = STRING_METHOD_SWAP[old_attr]
+            mut_func = ast.Attribute(value=v_func.value if isinstance(v_func, ast.Attribute) else self.visit(node.func.value), attr=new_attr, ctx=node.func.ctx)
+            mut_call = ast.Call(func=mut_func, args=v_args, keywords=v_kws)
+            desc = f"Swap string method '{old_attr}' with '{new_attr}'"
+            return self._wrap_ifexp(orig_call, mut_call, lineno, desc, old_attr, new_attr)
+        elif isinstance(node.func, ast.Attribute) and node.func.attr == "get" and len(node.args) == 2 and not _is_none_constant(node.args[1]):
+            mut_call = ast.Call(func=v_func, args=[v_args[0], ast.Constant(value=None)], keywords=[])
+            desc = "Remove dictionary .get() default fallback (replace with None)"
+            return self._wrap_ifexp(orig_call, mut_call, lineno, desc, "default", "None")
+        elif len(node.args) == 2 and not _is_special_builtin_call(node) and not is_range_zero_start(node):
+            mut_call = ast.Call(func=v_func, args=[v_args[1], v_args[0]], keywords=v_kws)
+            desc = "Swap positional arguments in function call (arg1 <-> arg2)"
+            return self._wrap_ifexp(orig_call, mut_call, lineno, desc, "arg1, arg2", "arg2, arg1")
+        return orig_call
+
+
+def generate_schemata_for_file(
+    file_path: Path,
+    line_ranges: Optional[Set[int]] = None,
+) -> Tuple[Optional[str], List[Mutant], Dict[str, int]]:
+    """
+    Generate an in-memory mutant schemata file and mapped Mutant instances.
+    """
+    try:
+        source = file_path.read_text(encoding="utf-8", errors="replace")
+        tree = ast.parse(source)
+    except Exception:
+        return None, [], {}
+
+    lines = source.splitlines()
+    pragma_suppressed_lines: Set[int] = set()
+    for l_idx, line_str in enumerate(lines, start=1):
+        if "#" in line_str:
+            comment_part = line_str.split("#", 1)[1].lower()
+            if any(p in comment_part for p in ["pragma: no mutate", "pragma: no-mutate", "mutmut: disable", "cosmic-ray: disable"]):
+                pragma_suppressed_lines.add(l_idx)
+
+    finder = DeadCodeFinder()
+    finder.visit(tree)
+
+    transformer = MutationSchemataTransformer(
+        pragma_suppressed_lines,
+        dead_lines=finder.dead_lines,
+        line_ranges=line_ranges,
+    )
+    schemata_tree = transformer.visit(tree)
+    ast.fix_missing_locations(schemata_tree)
+
+    # Insert _dp_m runtime switch helper after docstring and __future__ imports
+    header_ast = ast.parse('''import os as _dp_os
+def _dp_m(mid: int) -> bool:
+    return _dp_os.environ.get('__DEPLOYPROOF_MUTANT__', '') == str(mid)
+''')
+    insert_pos = 0
+    for idx, stmt in enumerate(schemata_tree.body):
+        if idx == 0 and _is_docstring_expr(stmt):
+            insert_pos = idx + 1
+        elif isinstance(stmt, ast.ImportFrom) and stmt.module == "__future__":
+            insert_pos = idx + 1
+        else:
+            break
+
+    schemata_tree.body = (
+        schemata_tree.body[:insert_pos]
+        + header_ast.body
+        + schemata_tree.body[insert_pos:]
+    )
+    ast.fix_missing_locations(schemata_tree)
+
+    try:
+        schemata_source = ast.unparse(schemata_tree)
+    except Exception:
+        return None, [], {}
+
+    mutants: List[Mutant] = []
+    switch_map: Dict[str, int] = {}
+
+    for mid, lineno, desc, old_val, new_val, col_offset, end_col_offset in transformer.mutant_records:
+        raw_line = lines[lineno - 1] if 0 <= lineno - 1 < len(lines) else ""
+        orig_line = raw_line.strip()
+        if col_offset is not None and end_col_offset is not None and (0 <= col_offset <= end_col_offset <= len(raw_line)):
+            span_text = raw_line[col_offset:end_col_offset]
+            if old_val and span_text == old_val:
+                mut_line = (raw_line[:col_offset] + new_val + raw_line[end_col_offset:]).strip()
+            elif old_val and old_val in span_text:
+                mut_span = span_text.replace(old_val, new_val, 1)
+                mut_line = (raw_line[:col_offset] + mut_span + raw_line[end_col_offset:]).strip()
+            else:
+                mut_line = orig_line
+        else:
+            mut_line = orig_line
+
+        mutant_id = f"{file_path.name}:{lineno}:schemata_{mid}"
+        m = Mutant(
+            mutant_id=mutant_id,
+            file_path=file_path,
+            line_number=lineno,
+            description=desc,
+            original_line=orig_line,
+            mutated_line=mut_line,
+            mutated_source="",
+        )
+        mutants.append(m)
+        switch_map[mutant_id] = mid
+
+    return schemata_source, mutants, switch_map
 
 def _error_traces_to_mutant(error_output: str, mutant: Mutant) -> bool:
     """
@@ -929,13 +2080,13 @@ def _run_single_mutant_in_sandbox(
     baseline_errors: int,
     effective_timeout: float,
     env_pythonpath: str,
+    schemata_switch_num: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Execute a single mutant in a PID-isolated worker sandbox directory.
     
-    Guarantees 100% process isolation without cross-worker file race conditions.
-    Each worker process maintains its own private directory cloned from a clean snapshot.
-    Restores sandbox file state after test execution.
+    When schemata_switch_num is provided, runs via in-memory mutation switching with zero disk I/O.
+    Falls back to isolated on-disk file writes if schemata is unavailable.
     """
     temp_base = Path(temp_base_str)
     snapshot_dir = Path(snapshot_dir_str)
@@ -963,18 +2114,23 @@ def _run_single_mutant_in_sandbox(
         except Exception:
             pass
 
-    try:
-        original_code = target_file.read_text(encoding="utf-8", errors="replace")
-    except Exception as e:
-        return {
-            "mutant_id": mutant_id,
-            "status": "RUNNER_ERROR",
-            "error_msg": f"Failed reading source file in sandbox: {e}",
-        }
+    original_code = ""
+    if schemata_switch_num is None:
+        try:
+            original_code = target_file.read_text(encoding="utf-8", errors="replace")
+        except Exception as e:
+            return {
+                "mutant_id": mutant_id,
+                "status": "RUNNER_ERROR",
+                "error_msg": f"Failed reading source file in sandbox: {e}",
+            }
 
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["DEPLOYPROOF_WORKER"] = "1"
+    if schemata_switch_num is not None:
+        env["__DEPLOYPROOF_MUTANT__"] = str(schemata_switch_num)
+
     paths_to_add = []
     if (worker_dir / "src").is_dir():
         paths_to_add.append(str(worker_dir / "src"))
@@ -999,20 +2155,32 @@ def _run_single_mutant_in_sandbox(
     if baseline_errors == 0:
         cmd.append("-x")
     
+    if not pytest_args:
+        return {
+            "mutant_id": mutant_id,
+            "status": "SURVIVED",
+            "error_msg": None,
+        }
+
     effective_pytest_args = list(pytest_args)
-    if len(effective_pytest_args) > 15:
+    is_nodeids = any("::" in arg for arg in effective_pytest_args)
+    if not is_nodeids and len(effective_pytest_args) > 15:
         top_dirs = set(Path(p).parts[0] for p in effective_pytest_args if Path(p).parts)
         if top_dirs and all((worker_dir / d).is_dir() for d in top_dirs):
             effective_pytest_args = sorted(list(top_dirs))
         else:
             effective_pytest_args = effective_pytest_args[:15]
+    elif is_nodeids and len(effective_pytest_args) > 25:
+        effective_pytest_args = effective_pytest_args[:25]
     cmd.extend(effective_pytest_args)
 
     status = "SURVIVED"
     error_msg = None
 
     try:
-        target_file.write_text(mutated_source, encoding="utf-8")
+        if schemata_switch_num is None:
+            target_file.write_text(mutated_source, encoding="utf-8")
+
         res = subprocess.run(
             cmd,
             cwd=worker_dir,
@@ -1075,17 +2243,50 @@ def _run_single_mutant_in_sandbox(
         status = "RUNNER_ERROR"
         error_msg = f"Execution exception: {type(e).__name__}: {e}"
     finally:
-        try:
-            target_file.write_text(original_code, encoding="utf-8")
-            _cleanup_pyc_in_dir(target_file.parent)
-        except Exception:
-            pass
+        if schemata_switch_num is None:
+            try:
+                target_file.write_text(original_code, encoding="utf-8")
+                _cleanup_pyc_in_dir(target_file.parent)
+            except Exception:
+                pass
 
     return {
         "mutant_id": mutant_id,
         "status": status,
         "error_msg": error_msg,
     }
+
+
+def _normalize_test_nodeid(nodeid: str, workdir: Path) -> str:
+    """Normalize a pytest nodeid (path::test_name) so its file path exists relative to workdir."""
+    if "::" in nodeid:
+        file_part, test_part = nodeid.split("::", 1)
+        suffix = "::" + test_part
+    else:
+        file_part = nodeid
+        suffix = ""
+
+    fp = Path(file_part)
+    if (workdir / fp).exists():
+        return nodeid
+
+    if fp.is_absolute() and fp.exists():
+        try:
+            rel = fp.relative_to(workdir).as_posix()
+            return f"{rel}{suffix}"
+        except ValueError:
+            return f"{fp.as_posix()}{suffix}"
+
+    # Search if filename exists in workdir
+    for candidate in workdir.rglob(fp.name):
+        if candidate.is_file():
+            try:
+                rel = candidate.relative_to(workdir).as_posix()
+                return f"{rel}{suffix}"
+            except ValueError:
+                pass
+
+    return nodeid
 
 
 def _run_mutation_tests_sequential(
@@ -1103,7 +2304,10 @@ def _run_mutation_tests_sequential(
     root = (repo_root or Path.cwd()).resolve()
     start_time = time.time()
     file_mutants_map: Dict[Path, List[Mutant]] = {}
+    file_schemata_code_map: Dict[Path, str] = {}
+    file_switch_map: Dict[Path, Dict[str, int]] = {}
     all_skipped: List[SkippedConstruct] = []
+    all_pruned_equivalent: List[PrunedEquivalentMutant] = []
     total_mutants_count = 0
 
     for f in target_files:
@@ -1112,13 +2316,32 @@ def _run_mutation_tests_sequential(
             if not is_full_repo:
                 from deployproof.diff import get_modified_line_ranges
                 line_ranges = get_modified_line_ranges(f, root, base=base)
-            f_mutants = generate_mutants_for_file(f, line_ranges=line_ranges)
+            
+            schemata_src, f_mutants, switch_map = generate_schemata_for_file(f, line_ranges=line_ranges)
+            if schemata_src and f_mutants:
+                file_schemata_code_map[f] = schemata_src
+                file_switch_map[f] = switch_map
+            else:
+                f_mutants = generate_mutants_for_file(f, line_ranges=line_ranges)
+
             file_mutants_map[f] = f_mutants
             total_mutants_count += len(f_mutants)
             all_skipped.extend(collect_skipped_constructs_for_file(f, line_ranges=line_ranges))
+            all_pruned_equivalent.extend(collect_equivalent_mutants_for_file(f, line_ranges=line_ranges))
 
     if total_mutants_count == 0:
-        return MutationResult(total_mutants=0, killed_mutants=0, survived_mutants=[], untested_files=[], runner_errors=[], skipped_constructs=all_skipped, mutation_score=100.0, duration_seconds=round(time.time() - start_time, 2), files_tested=target_files)
+        return MutationResult(
+            total_mutants=0,
+            killed_mutants=0,
+            survived_mutants=[],
+            untested_files=[],
+            runner_errors=[],
+            skipped_constructs=all_skipped,
+            pruned_equivalent_mutants=all_pruned_equivalent,
+            mutation_score=100.0,
+            duration_seconds=round(time.time() - start_time, 2),
+            files_tested=target_files,
+        )
 
     killed_count = 0
     survived: List[Mutant] = []
@@ -1160,7 +2383,30 @@ def _run_mutation_tests_sequential(
                     survived.append(mutant)
                 continue
 
-            pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=short', '-p', 'no:cacheprovider'] + pytest_args
+            has_coverage = importlib.util.find_spec("coverage") is not None
+            cov_temp_dir = tempfile.mkdtemp(prefix="deployproof_seq_cov_")
+            cov_file = Path(cov_temp_dir) / ".coverage"
+            cov_source = str(root / "src") if (root / "src").is_dir() else str(root)
+
+            if has_coverage:
+                pytest_cmd = [
+                    sys.executable,
+                    "-B",
+                    "-m",
+                    "coverage",
+                    "run",
+                    f"--data-file={cov_file}",
+                    f"--source={cov_source}",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--tb=short",
+                    "-p",
+                    "deployproof.coverage_plugin",
+                ] + pytest_args
+            else:
+                pytest_cmd = [sys.executable, "-B", "-m", "pytest", "-q", "--tb=short", "-p", "no:cacheprovider"] + pytest_args
+
             t0 = time.time()
             baseline_timeout = _calculate_baseline_timeout(pytest_args, root, test_runner_timeout)
 
@@ -1171,11 +2417,30 @@ def _run_mutation_tests_sequential(
                     env=env,
                     capture_output=True,
                     text=True,
-                    encoding='utf-8',
-                    errors='replace',
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=baseline_timeout,
                 )
+                if has_coverage and (
+                    "no module named coverage" in baseline_res.stderr.lower()
+                    or (baseline_res.returncode != 0 and parse_pytest_summary(baseline_res.stdout + "\n" + baseline_res.stderr)["no_tests_ran"])
+                ):
+                    fallback_cmd = [sys.executable, "-B", "-m", "pytest", "-q", "--tb=short", "-p", "no:cacheprovider"] + pytest_args
+                    baseline_res = subprocess.run(
+                        fallback_cmd,
+                        cwd=root,
+                        env=env,
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                        timeout=baseline_timeout,
+                    )
             except Exception as e:
+                try:
+                    shutil.rmtree(cov_temp_dir, ignore_errors=True)
+                except Exception:
+                    pass
                 return MutationResult(
                     total_mutants=total_mutants_count,
                     killed_mutants=killed_count,
@@ -1186,8 +2451,36 @@ def _run_mutation_tests_sequential(
                     mutation_score=None,
                     duration_seconds=round(time.time() - start_time, 2),
                     files_tested=target_files,
-                    collection_error=f'Execution exception during baseline test run: {type(e).__name__}: {e}',
+                    collection_error=f"Execution exception during baseline test run: {type(e).__name__}: {e}",
                 )
+
+            # Load coverage map for current file
+            seq_f_contexts: Dict[int, List[str]] = {}
+            seq_f_lines: Optional[Set[int]] = None
+            if has_coverage and cov_file.is_file():
+                try:
+                    import coverage
+                    cov = coverage.Coverage(data_file=str(cov_file))
+                    cov.load()
+                    cov_data = cov.get_data()
+                    for mf in cov_data.measured_files():
+                        if Path(mf).resolve() == f.resolve() or Path(mf).name.lower() == f.name.lower():
+                            ctx_map = cov_data.contexts_by_lineno(mf)
+                            for l_no, ctx_list in ctx_map.items():
+                                valid_tests = [c for c in ctx_list if c and c.strip()]
+                                if valid_tests:
+                                    seq_f_contexts[l_no] = sorted(list(set(valid_tests)))
+                            executed_lines = cov_data.lines(mf)
+                            if executed_lines:
+                                seq_f_lines = set(executed_lines)
+                            break
+                except Exception:
+                    pass
+
+            try:
+                shutil.rmtree(cov_temp_dir, ignore_errors=True)
+            except Exception:
+                pass
 
             baseline_duration = max(time.time() - t0, 0.5)
             combined_output = baseline_res.stdout + '\n' + baseline_res.stderr
@@ -1228,93 +2521,128 @@ def _run_mutation_tests_sequential(
                     survived.append(mutant)
                 continue
 
-            effective_timeout = max(test_runner_timeout, baseline_duration * 3.0 + 5.0)
+            effective_timeout = max(baseline_duration * 1.5, test_runner_timeout)
             baseline_has_errors = baseline_summary.get('errors', 0) > 0
-            mutant_pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=short', '-p', 'no:cacheprovider']
-            if not baseline_has_errors:
-                mutant_pytest_cmd.append('-x')
-            mutant_pytest_cmd.extend(pytest_args)
 
-            for mutant in mutants:
-                completed_mutants += 1
-                now = time.time()
-                if not quiet and (
-                    (completed_mutants == 1)
-                    or (completed_mutants % 5 == 0)
-                    or (now - last_progress_print >= 5.0)
-                    or (completed_mutants == total_mutants_count)
-                ):
-                    if (now - last_progress_print >= 0.5) or (completed_mutants == total_mutants_count):
-                        last_progress_print = now
-                        elapsed = now - start_time
-                        elapsed_str = f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s"
-                        print(
-                            f"  [{completed_mutants}/{total_mutants_count} mutants] elapsed: {elapsed_str}",
-                            flush=True,
+            original_code = f.read_text(encoding='utf-8', errors='replace')
+            _CURRENT_MUTATED_FILE = f
+            _CURRENT_ORIGINAL_CONTENT = original_code
+
+            use_schemata = f in file_schemata_code_map
+            if use_schemata:
+                f.write_text(file_schemata_code_map[f], encoding='utf-8')
+
+            try:
+                for mutant in mutants:
+                    completed_mutants += 1
+
+                    # Dynamic test selection & instant unexecuted line handling
+                    if seq_f_lines is not None:
+                        if mutant.line_number not in seq_f_lines:
+                            # Zero tests execute this line -> mutant survives instantly without subprocess overhead
+                            mutant.status = "SURVIVED"
+                            survived.append(mutant)
+                            continue
+
+                        covering_tests = seq_f_contexts.get(mutant.line_number, [])
+                        if covering_tests:
+                            mutant_pytest_args = [_normalize_test_nodeid(t, root) for t in covering_tests[:15]]
+                        else:
+                            mutant_pytest_args = pytest_args
+                    else:
+                        mutant_pytest_args = pytest_args
+
+                    mutant_pytest_cmd = [sys.executable, '-B', '-m', 'pytest', '-q', '--tb=short', '-p', 'no:cacheprovider']
+                    if not baseline_has_errors:
+                        mutant_pytest_cmd.append('-x')
+                    mutant_pytest_cmd.extend(mutant_pytest_args)
+                    now = time.time()
+                    if not quiet and (
+                        (completed_mutants == 1)
+                        or (completed_mutants % 5 == 0)
+                        or (now - last_progress_print >= 5.0)
+                        or (completed_mutants == total_mutants_count)
+                    ):
+                        if (now - last_progress_print >= 0.5) or (completed_mutants == total_mutants_count):
+                            last_progress_print = now
+                            elapsed = now - start_time
+                            elapsed_str = f"{int(elapsed // 60)}m{int(elapsed % 60):02d}s"
+                            print(
+                                f"  [{completed_mutants}/{total_mutants_count} mutants] elapsed: {elapsed_str}",
+                                flush=True,
+                            )
+
+                    switch_num = file_switch_map.get(f, {}).get(mutant.mutant_id)
+                    mutant_env = env.copy()
+                    if switch_num is not None:
+                        mutant_env['__DEPLOYPROOF_MUTANT__'] = str(switch_num)
+                    else:
+                        mutant.file_path.write_text(mutant.mutated_source, encoding='utf-8')
+
+                    try:
+                        res = subprocess.run(
+                            mutant_pytest_cmd,
+                            cwd=root,
+                            env=mutant_env,
+                            capture_output=True,
+                            text=True,
+                            encoding='utf-8',
+                            errors='replace',
+                            timeout=effective_timeout,
                         )
+                        combined_out = res.stdout + '\n' + res.stderr
+                        mut_summary = parse_pytest_summary(combined_out)
+                        baseline_errors = baseline_summary.get('errors', 0)
+                        mut_failed = mut_summary.get('failed', 0)
+                        mut_passed = mut_summary.get('passed', 0)
+                        mut_errors = mut_summary.get('errors', 0)
 
-                original_code = mutant.file_path.read_text(encoding='utf-8', errors='replace')
-                _CURRENT_MUTATED_FILE = mutant.file_path
-                _CURRENT_ORIGINAL_CONTENT = original_code
-                try:
-                    mutant.file_path.write_text(mutant.mutated_source, encoding='utf-8')
-                    res = subprocess.run(
-                        mutant_pytest_cmd,
-                        cwd=root,
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        encoding='utf-8',
-                        errors='replace',
-                        timeout=effective_timeout,
-                    )
-                    combined_out = res.stdout + '\n' + res.stderr
-                    mut_summary = parse_pytest_summary(combined_out)
-                    baseline_errors = baseline_summary.get('errors', 0)
-                    mut_failed = mut_summary.get('failed', 0)
-                    mut_passed = mut_summary.get('passed', 0)
-                    mut_errors = mut_summary.get('errors', 0)
-
-                    if res.returncode == 5 or mut_summary['no_tests_ran']:
-                        mutant.status = 'SURVIVED'
-                        survived.append(mutant)
-                    elif mut_failed > 0:
+                        if res.returncode == 5 or mut_summary['no_tests_ran']:
+                            mutant.status = 'SURVIVED'
+                            survived.append(mutant)
+                        elif mut_failed > 0:
+                            mutant.status = 'KILLED'
+                            killed_count += 1
+                        elif mut_errors > baseline_errors or (res.returncode == 1 and mut_passed == 0 and mut_failed == 0):
+                            if _error_traces_to_mutant(combined_out, mutant):
+                                mutant.status = 'KILLED'
+                                killed_count += 1
+                            else:
+                                mutant.status = 'RUNNER_ERROR'
+                                concise_err = extract_collection_error(combined_out, res.returncode)
+                                err_msg = f'Pytest exit code {res.returncode}: {concise_err}'
+                                runner_errors.append((mutant, err_msg))
+                        elif mut_passed > 0 and mut_failed == 0 and mut_errors <= baseline_errors:
+                            mutant.status = 'SURVIVED'
+                            survived.append(mutant)
+                        elif res.returncode in (2, 3, 4):
+                            if _error_traces_to_mutant(combined_out, mutant):
+                                mutant.status = 'KILLED'
+                                killed_count += 1
+                            else:
+                                mutant.status = 'RUNNER_ERROR'
+                                concise_err = extract_collection_error(combined_out, res.returncode)
+                                err_msg = f'Pytest exit code {res.returncode}: {concise_err}'
+                                runner_errors.append((mutant, err_msg))
+                        else:
+                            mutant.status = 'SURVIVED'
+                            survived.append(mutant)
+                    except subprocess.TimeoutExpired:
                         mutant.status = 'KILLED'
                         killed_count += 1
-                    elif mut_errors > baseline_errors or (res.returncode == 1 and mut_passed == 0 and mut_failed == 0):
-                        if _error_traces_to_mutant(combined_out, mutant):
-                            mutant.status = 'KILLED'
-                            killed_count += 1
-                        else:
-                            mutant.status = 'RUNNER_ERROR'
-                            concise_err = extract_collection_error(combined_out, res.returncode)
-                            err_msg = f'Pytest exit code {res.returncode}: {concise_err}'
-                            runner_errors.append((mutant, err_msg))
-                    elif mut_passed > 0 and mut_failed == 0 and mut_errors <= baseline_errors:
-                        mutant.status = 'SURVIVED'
-                        survived.append(mutant)
-                    elif res.returncode in (2, 3, 4):
-                        if _error_traces_to_mutant(combined_out, mutant):
-                            mutant.status = 'KILLED'
-                            killed_count += 1
-                        else:
-                            mutant.status = 'RUNNER_ERROR'
-                            concise_err = extract_collection_error(combined_out, res.returncode)
-                            err_msg = f'Pytest exit code {res.returncode}: {concise_err}'
-                            runner_errors.append((mutant, err_msg))
-                    else:
-                        mutant.status = 'SURVIVED'
-                        survived.append(mutant)
-                except subprocess.TimeoutExpired:
-                    mutant.status = 'KILLED'
-                    killed_count += 1
-                except Exception as e:
-                    mutant.status = 'RUNNER_ERROR'
-                    runner_errors.append((mutant, f'Execution exception: {type(e).__name__}: {e}'))
-                finally:
-                    mutant.file_path.write_text(original_code, encoding='utf-8')
-                    _CURRENT_MUTATED_FILE = None
-                    _CURRENT_ORIGINAL_CONTENT = None
+                    except Exception as e:
+                        mutant.status = 'RUNNER_ERROR'
+                        runner_errors.append((mutant, f'Execution exception: {type(e).__name__}: {e}'))
+                    finally:
+                        if switch_num is None:
+                            if use_schemata:
+                                f.write_text(file_schemata_code_map[f], encoding='utf-8')
+                            else:
+                                f.write_text(original_code, encoding='utf-8')
+            finally:
+                f.write_text(original_code, encoding='utf-8')
+                _CURRENT_MUTATED_FILE = None
+                _CURRENT_ORIGINAL_CONTENT = None
     finally:
         _restore_current_mutant_file()
         remove_mutation_signal_handlers()
@@ -1332,6 +2660,7 @@ def _run_mutation_tests_sequential(
         untested_files=sorted(untested_files_set),
         runner_errors=runner_errors,
         skipped_constructs=all_skipped,
+        pruned_equivalent_mutants=all_pruned_equivalent,
         mutation_score=round(score, 1),
         duration_seconds=round(time.time() - start_time, 2),
         files_tested=target_files,
@@ -1363,7 +2692,10 @@ def run_mutation_tests_parallel(
 
     # 2. Collect mutants and skipped constructs
     file_mutants_map: Dict[Path, List[Mutant]] = {}
+    file_schemata_code_map: Dict[Path, str] = {}
+    file_switch_map: Dict[Path, Dict[str, int]] = {}
     all_skipped: List[SkippedConstruct] = []
+    all_pruned_equivalent: List[PrunedEquivalentMutant] = []
     total_mutants_count = 0
 
     for f in target_files:
@@ -1372,10 +2704,18 @@ def run_mutation_tests_parallel(
             if not is_full_repo:
                 from deployproof.diff import get_modified_line_ranges
                 line_ranges = get_modified_line_ranges(f, root, base=base)
-            f_mutants = generate_mutants_for_file(f, line_ranges=line_ranges)
+            
+            schemata_src, f_mutants, switch_map = generate_schemata_for_file(f, line_ranges=line_ranges)
+            if schemata_src and f_mutants:
+                file_schemata_code_map[f] = schemata_src
+                file_switch_map[f] = switch_map
+            else:
+                f_mutants = generate_mutants_for_file(f, line_ranges=line_ranges)
+
             file_mutants_map[f] = f_mutants
             total_mutants_count += len(f_mutants)
             all_skipped.extend(collect_skipped_constructs_for_file(f, line_ranges=line_ranges))
+            all_pruned_equivalent.extend(collect_equivalent_mutants_for_file(f, line_ranges=line_ranges))
 
     if total_mutants_count == 0:
         return MutationResult(
@@ -1385,6 +2725,7 @@ def run_mutation_tests_parallel(
             untested_files=[],
             runner_errors=[],
             skipped_constructs=all_skipped,
+            pruned_equivalent_mutants=all_pruned_equivalent,
             mutation_score=100.0,
             duration_seconds=round(time.time() - start_time, 2),
             files_tested=target_files,
@@ -1421,6 +2762,7 @@ def run_mutation_tests_parallel(
             untested_files=sorted(untested_files_set),
             runner_errors=[],
             skipped_constructs=all_skipped,
+            pruned_equivalent_mutants=all_pruned_equivalent,
             mutation_score=0.0,
             duration_seconds=round(time.time() - start_time, 2),
             files_tested=target_files,
@@ -1483,153 +2825,152 @@ def run_mutation_tests_parallel(
         snapshot_tmp = snapshot_dir / ".pytest_tmp"
         cov_source = str(snapshot_dir / "src") if (snapshot_dir / "src").is_dir() else str(snapshot_dir)
 
-        for f in tested_files:
-            pytest_args = file_test_map[f]
-            suite_key = tuple(pytest_args)
+        all_unique_pytest_args = sorted(list(set(t for f in tested_files for t in file_test_map.get(f, []))))
+        if not all_unique_pytest_args:
+            all_unique_pytest_args = ["tests"] if (snapshot_dir / "tests").is_dir() else [str(snapshot_dir)]
 
-            if suite_key not in suite_baseline_cache:
-                if not quiet:
-                    print(f"DeployProof: Running baseline test suite on {len(pytest_args)} test file(s) (collecting coverage map)...", flush=True)
-                t0 = time.time()
-                baseline_timeout = _calculate_baseline_timeout(pytest_args, snapshot_dir, test_runner_timeout)
-                
-                # Attempt coverage-guided baseline run if coverage is available
-                has_coverage = importlib.util.find_spec("coverage") is not None
-                if has_coverage:
-                    pytest_cmd = [
-                        sys.executable,
-                        "-B",
-                        "-m",
-                        "coverage",
-                        "run",
-                        "-p",
-                        f"--source={cov_source}",
-                        "-m",
-                        "pytest",
-                        "-q",
-                        "--tb=short",
-                        "-p",
-                        "_deployproof_cov_plugin",
-                        "-o",
-                        f"cache_dir={snapshot_cache}",
-                        f"--basetemp={snapshot_tmp}",
-                    ] + pytest_args
-                else:
-                    pytest_cmd = [
-                        sys.executable,
-                        "-B",
-                        "-m",
-                        "pytest",
-                        "-q",
-                        "--tb=short",
-                        "-o",
-                        f"cache_dir={snapshot_cache}",
-                        f"--basetemp={snapshot_tmp}",
-                    ] + pytest_args
+        if not quiet:
+            print(f"DeployProof: Running baseline test suite on {len(all_unique_pytest_args)} test file(s) (collecting coverage map)...", flush=True)
 
-                try:
-                    baseline_res = subprocess.run(
-                        pytest_cmd,
-                        cwd=snapshot_dir,
-                        env=env_snapshot,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        timeout=baseline_timeout,
-                    )
-                    # If coverage run failed to execute, fallback to standard pytest
-                    if has_coverage and (
-                        "no module named coverage" in baseline_res.stderr.lower()
-                        or "coverage" in baseline_res.stderr.lower()
-                        or (baseline_res.returncode != 0 and parse_pytest_summary(baseline_res.stdout + "\n" + baseline_res.stderr)["no_tests_ran"])
-                    ):
-                        fallback_cmd = [
-                            sys.executable,
-                            "-B",
-                            "-m",
-                            "pytest",
-                            "-q",
-                            "--tb=short",
-                            "-o",
-                            f"cache_dir={snapshot_cache}",
-                            f"--basetemp={snapshot_tmp}",
-                        ] + pytest_args
-                        baseline_res = subprocess.run(
-                            fallback_cmd,
-                            cwd=snapshot_dir,
-                            env=env_snapshot,
-                            capture_output=True,
-                            text=True,
-                            encoding="utf-8",
-                            errors="replace",
-                            timeout=baseline_timeout,
-                        )
-                except Exception as e:
-                    return MutationResult(
-                        total_mutants=total_mutants_count,
-                        killed_mutants=0,
-                        survived_mutants=[],
-                        untested_files=sorted(untested_files_set),
-                        runner_errors=[],
-                        skipped_constructs=all_skipped,
-                        mutation_score=None,
-                        duration_seconds=round(time.time() - start_time, 2),
-                        files_tested=target_files,
-                        collection_error=f"Execution exception during baseline test run: {type(e).__name__}: {e}",
-                    )
+        t0 = time.time()
+        baseline_timeout = _calculate_baseline_timeout(all_unique_pytest_args, snapshot_dir, test_runner_timeout)
+        has_coverage = importlib.util.find_spec("coverage") is not None
 
-                baseline_duration = max(time.time() - t0, 0.5)
-                if not quiet:
-                    print(f"DeployProof: Baseline test run completed in {baseline_duration:.1f}s.", flush=True)
-                combined_output = baseline_res.stdout + "\n" + baseline_res.stderr
-                baseline_summary = parse_pytest_summary(combined_output)
+        if has_coverage:
+            pytest_cmd = [
+                sys.executable,
+                "-B",
+                "-m",
+                "coverage",
+                "run",
+                "-p",
+                f"--source={cov_source}",
+                "-m",
+                "pytest",
+                "-q",
+                "--tb=short",
+                "-p",
+                "_deployproof_cov_plugin",
+                "-o",
+                f"cache_dir={snapshot_cache}",
+                f"--basetemp={snapshot_tmp}",
+            ] + all_unique_pytest_args
+        else:
+            pytest_cmd = [
+                sys.executable,
+                "-B",
+                "-m",
+                "pytest",
+                "-q",
+                "--tb=short",
+                "-o",
+                f"cache_dir={snapshot_cache}",
+                f"--basetemp={snapshot_tmp}",
+            ] + all_unique_pytest_args
 
-                is_collection_error = (
-                    baseline_res.returncode in (2, 3, 4)
-                    or "modulenotfounderror" in combined_output.lower()
-                    or "importerror" in combined_output.lower()
-                    or ("error during collection" in combined_output.lower())
-                    or ("error while loading conftest" in combined_output.lower())
-                    or ("zoneinfonotfounderror" in combined_output.lower())
-                    or (
-                        baseline_summary.get("errors", 0) > 0
-                        and baseline_summary.get("passed", 0) == 0
-                        and (baseline_summary.get("failed", 0) == 0)
-                    )
+        try:
+            baseline_res = subprocess.run(
+                pytest_cmd,
+                cwd=snapshot_dir,
+                env=env_snapshot,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=baseline_timeout,
+            )
+            # If coverage run failed to execute, fallback to standard pytest
+            if has_coverage and (
+                "no module named coverage" in baseline_res.stderr.lower()
+                or "coverage" in baseline_res.stderr.lower()
+                or (baseline_res.returncode != 0 and parse_pytest_summary(baseline_res.stdout + "\n" + baseline_res.stderr)["no_tests_ran"])
+            ):
+                fallback_cmd = [
+                    sys.executable,
+                    "-B",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "--tb=short",
+                    "-o",
+                    f"cache_dir={snapshot_cache}",
+                    f"--basetemp={snapshot_tmp}",
+                ] + all_unique_pytest_args
+                baseline_res = subprocess.run(
+                    fallback_cmd,
+                    cwd=snapshot_dir,
+                    env=env_snapshot,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=baseline_timeout,
                 )
-                if is_collection_error:
-                    err_msg = extract_collection_error(combined_output, baseline_res.returncode)
-                    return MutationResult(
-                        total_mutants=total_mutants_count,
-                        killed_mutants=0,
-                        survived_mutants=[],
-                        untested_files=sorted(untested_files_set),
-                        runner_errors=[],
-                        skipped_constructs=all_skipped,
-                        mutation_score=None,
-                        duration_seconds=round(time.time() - start_time, 2),
-                        files_tested=target_files,
-                        collection_error=err_msg,
-                    )
+        except Exception as e:
+            return MutationResult(
+                total_mutants=total_mutants_count,
+                killed_mutants=0,
+                survived_mutants=[],
+                untested_files=sorted(untested_files_set),
+                runner_errors=[],
+                skipped_constructs=all_skipped,
+                mutation_score=None,
+                duration_seconds=round(time.time() - start_time, 2),
+                files_tested=target_files,
+                collection_error=f"Execution exception during baseline test run: {type(e).__name__}: {e}",
+            )
 
-                no_tests = (baseline_res.returncode == 5 or baseline_summary["no_tests_ran"])
-                eff_timeout = max(test_runner_timeout, baseline_duration * 3.0 + 5.0)
-                suite_baseline_cache[suite_key] = (no_tests, baseline_summary.get("errors", 0), eff_timeout, False, None)
+        baseline_duration = max(time.time() - t0, 0.5)
+        if not quiet:
+            print(f"DeployProof: Baseline test run completed in {baseline_duration:.1f}s.", flush=True)
+        combined_output = baseline_res.stdout + "\n" + baseline_res.stderr
+        baseline_summary = parse_pytest_summary(combined_output)
 
-            no_tests, base_errors, eff_timeout, _, _ = suite_baseline_cache[suite_key]
+        is_collection_error = (
+            baseline_res.returncode in (2, 3, 4)
+            or "modulenotfounderror" in combined_output.lower()
+            or "importerror" in combined_output.lower()
+            or ("error during collection" in combined_output.lower())
+            or ("error while loading conftest" in combined_output.lower())
+            or ("zoneinfonotfounderror" in combined_output.lower())
+            or (
+                baseline_summary.get("errors", 0) > 0
+                and baseline_summary.get("passed", 0) == 0
+                and (baseline_summary.get("failed", 0) == 0)
+            )
+        )
+        if is_collection_error:
+            err_msg = extract_collection_error(combined_output, baseline_res.returncode)
+            return MutationResult(
+                total_mutants=total_mutants_count,
+                killed_mutants=0,
+                survived_mutants=[],
+                untested_files=sorted(untested_files_set),
+                runner_errors=[],
+                skipped_constructs=all_skipped,
+                mutation_score=None,
+                duration_seconds=round(time.time() - start_time, 2),
+                files_tested=target_files,
+                collection_error=err_msg,
+            )
+
+        no_tests = (baseline_res.returncode == 5 or baseline_summary["no_tests_ran"])
+        eff_timeout = max(baseline_duration * 1.5, test_runner_timeout)
+        for f in tested_files:
             if no_tests:
                 untested_files_set.add(f)
                 for m in file_mutants_map[f]:
                     m.status = 'SURVIVED'
             else:
-                file_baseline_info[f] = (base_errors, eff_timeout)
+                file_baseline_info[f] = (baseline_summary.get("errors", 0), eff_timeout)
 
         # 5b. Extract per-file line-to-test coverage context mapping
         file_line_contexts: Dict[Path, Dict[int, List[str]]] = {}
+        file_measured_lines: Dict[Path, Set[int]] = {}
         try:
             import coverage
-            cov = coverage.Coverage()
+            cov_file = snapshot_dir / ".coverage"
+            cov = coverage.Coverage(data_file=str(cov_file) if cov_file.is_file() else None)
             try:
                 cov.combine(data_paths=[str(snapshot_dir)])
             except Exception:
@@ -1652,14 +2993,32 @@ def run_mutation_tests_parallel(
                         clean_ctx[l_no] = sorted(list(set(valid_tests)))
                 if clean_ctx:
                     file_line_contexts[orig_p] = clean_ctx
+                    file_line_contexts[mf_p] = clean_ctx
+
+                executed_lines = cov_data.lines(mf)
+                if executed_lines:
+                    file_measured_lines[orig_p] = set(executed_lines)
+                    file_measured_lines[mf_p] = set(executed_lines)
         except Exception:
             file_line_contexts = {}
+            file_measured_lines = {}
+
+        # 5c. Apply schemata transformations to snapshot directory for worker evaluation
+        for src_file, schemata_code in file_schemata_code_map.items():
+            try:
+                rel_p = src_file.relative_to(root)
+            except ValueError:
+                rel_p = Path(src_file.name)
+            dest_p = snapshot_dir / rel_p
+            dest_p.parent.mkdir(parents=True, exist_ok=True)
+            dest_p.write_text(schemata_code, encoding="utf-8")
 
         # 6. Build list of mutant tasks with coverage-guided test selection
         tasks = []
         mutants_by_id: Dict[str, Mutant] = {}
         temp_base_str = str(temp_base)
         snapshot_dir_str = str(snapshot_dir)
+        survived: List[Mutant] = []
 
         for f, mutants in file_mutants_map.items():
             if f in untested_files_set or f not in file_baseline_info:
@@ -1671,24 +3030,41 @@ def run_mutation_tests_parallel(
             except ValueError:
                 rel_f_str = f.name
 
-            # Lookup file's coverage contexts
+            # Lookup file's coverage contexts and measured lines
             f_contexts = {}
+            f_lines = None
             f_resolved = f.resolve()
             for stored_path, ctx_map in file_line_contexts.items():
-                if stored_path == f_resolved or str(stored_path).lower() == str(f_resolved).lower():
+                if stored_path == f_resolved or str(stored_path).lower() == str(f_resolved).lower() or stored_path.name.lower() == f.name.lower():
                     f_contexts = ctx_map
+                    break
+            for stored_path, l_set in file_measured_lines.items():
+                if stored_path == f_resolved or str(stored_path).lower() == str(f_resolved).lower() or stored_path.name.lower() == f.name.lower():
+                    f_lines = l_set
                     break
 
             for m in mutants:
                 mutants_by_id[m.mutant_id] = m
-                mutant_pytest_args = default_pytest_args
-                try:
+
+                # Dynamic test selection & instant unexecuted line handling
+                if f_lines is not None:
+                    # If this line was never executed during baseline test run (0 tests hit it):
+                    if m.line_number not in f_lines:
+                        # Zero tests execute this line -> mutant survives without wasting worker time
+                        m.status = "SURVIVED"
+                        survived.append(m)
+                        continue
+
                     covering_tests = f_contexts.get(m.line_number, [])
                     if covering_tests:
-                        mutant_pytest_args = covering_tests
-                except Exception:
+                        # Dynamic test selection: execute only the tests covering this line
+                        mutant_pytest_args = [_normalize_test_nodeid(t, snapshot_dir) for t in covering_tests[:15]]
+                    else:
+                        mutant_pytest_args = default_pytest_args
+                else:
                     mutant_pytest_args = default_pytest_args
 
+                switch_num = file_switch_map.get(f, {}).get(m.mutant_id)
                 tasks.append((
                     temp_base_str,
                     snapshot_dir_str,
@@ -1703,6 +3079,7 @@ def run_mutation_tests_parallel(
                     baseline_errors,
                     effective_timeout,
                     env_pythonpath,
+                    switch_num,
                 ))
 
         active_mutant_count = len(tasks)
@@ -1710,7 +3087,6 @@ def run_mutation_tests_parallel(
 
         # 7. Execute mutant tasks with ProcessPoolExecutor
         killed_count = 0
-        survived: List[Mutant] = []
         runner_errors: List[Tuple[Mutant, str]] = []
         completed_mutants = 0
         file_completed_counts: Dict[str, int] = {}
@@ -1800,6 +3176,7 @@ def run_mutation_tests_parallel(
             untested_files=sorted(untested_files_set),
             runner_errors=runner_errors,
             skipped_constructs=all_skipped,
+            pruned_equivalent_mutants=all_pruned_equivalent,
             mutation_score=round(score, 1),
             duration_seconds=round(time.time() - start_time, 2),
             files_tested=target_files,

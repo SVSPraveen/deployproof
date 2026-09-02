@@ -252,7 +252,7 @@ def test_live_progress_output_in_diff_scoped(tmp_path: Path, capsys, monkeypatch
     src = tmp_path / "math_utils.py"
     src.write_text("def compute(x: int) -> int:\n    if x > 10:\n        return x * 2\n    return x + 1\n", encoding="utf-8")
     test = tmp_path / "test_math_utils.py"
-    test.write_text("from math_utils import compute\ndef test_compute():\n    assert compute(15) == 30\n    assert compute(5) == 6\n", encoding="utf-8")
+    test.write_text("from math_utils import compute\ndef test_compute():\n    assert compute(15) == 30\n    assert compute(5) == 6\n    assert compute(11) == 22\n    assert compute(10) == 11\n", encoding="utf-8")
 
     exit_code = main(["check", "--files", str(src)])
     assert exit_code == 0

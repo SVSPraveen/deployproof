@@ -1,0 +1,8 @@
+# Auto-normalize line endings to LF across all platforms
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

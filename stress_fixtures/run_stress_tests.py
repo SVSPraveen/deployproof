@@ -20,6 +20,8 @@ if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from deployproof.control_flow import scan_session_files_for_control_flow
+from deployproof.dependencies import extract_all_new_dependencies
+from deployproof.diff import is_ignored_path
 from deployproof.mocks import scan_session_files_for_mocks
 from deployproof.mutator import run_mutation_tests
 from deployproof.secrets import scan_session_files_for_secrets
@@ -225,6 +227,26 @@ def run_all_stress_tests() -> List[TestResult]:
     )
 
     # -------------------------------------------------------------
+    # 7b. SYMLINKS: 3-Way Escape Suite (Abs, Rel Traversal, Non-PY)
+    # -------------------------------------------------------------
+    t0 = time.time()
+    f_abs = inspect_symlink(escape_sym_dir / "abs_link.py", "/etc/passwd", escape_sym_dir)
+    f_rel = inspect_symlink(escape_sym_dir / "rel_link.py", "../../../etc/passwd", escape_sym_dir)
+    f_txt = inspect_symlink(escape_sym_dir / "text_link.txt", "/var/secrets/key.pem", escape_sym_dir)
+    dt = time.time() - t0
+    all_escapes_caught = (f_abs.is_escape and f_rel.is_escape and f_txt.is_escape)
+    results.append(
+        TestResult(
+            category="Symlink & Sandbox",
+            fixture_name="03_three_way_escapes",
+            expectation="Flag /etc/passwd, ../../../, and .txt escapes",
+            actual=f"All 3 escape variants flagged: Abs={f_abs.is_escape}, Rel={f_rel.is_escape}, Txt={f_txt.is_escape}",
+            passed=all_escapes_caught,
+            duration_seconds=round(dt, 2),
+        )
+    )
+
+    # -------------------------------------------------------------
     # 8. CONTROL FLOW: Planted Bugs
     # -------------------------------------------------------------
     t0 = time.time()
@@ -313,6 +335,64 @@ def run_all_stress_tests() -> List[TestResult]:
             expectation="0 false positives on real, unmocked tests",
             actual=f"Clean: 0 findings across {len(mock_clean_files)} files",
             passed=passed,
+            duration_seconds=round(dt, 2),
+        )
+    )
+
+    # -------------------------------------------------------------
+    # 12. SCOPING: .env Leak & env/ Directory Non-Exclusion
+    # -------------------------------------------------------------
+    t0 = time.time()
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        fake_env = tdp / ".env"
+        fake_env.write_text("OPENAI_API_KEY=sk-proj-test1234567890ABCDEF\nDB_PASS=Secret123!\n", encoding="utf-8")
+        fake_game_env = tdp / "env" / "game_env.py"
+        fake_game_env.parent.mkdir(exist_ok=True)
+        fake_game_env.write_text("class GameEnv:\n    pass\n", encoding="utf-8")
+
+        env_not_ignored = not is_ignored_path(fake_env, tdp)
+        pkg_not_ignored = not is_ignored_path(fake_game_env, tdp)
+        sec_res = scan_session_files_for_secrets([fake_env])
+        env_leak_caught = len(sec_res.findings) >= 1
+    dt = time.time() - t0
+    scoping_passed = env_not_ignored and pkg_not_ignored and env_leak_caught
+    results.append(
+        TestResult(
+            category="Scoping & .env",
+            fixture_name="03_env_scoping_resilience",
+            expectation=".env & env/ packages preserved; secrets caught",
+            actual=f"Scoping OK: .env={env_not_ignored}, env/={pkg_not_ignored}, leak_caught={env_leak_caught}",
+            passed=scoping_passed,
+            duration_seconds=round(dt, 2),
+        )
+    )
+
+    # -------------------------------------------------------------
+    # 13. DEPENDENCY: Poetry pyproject.toml & Pipfile Tables
+    # -------------------------------------------------------------
+    t0 = time.time()
+    with tempfile.TemporaryDirectory() as td:
+        tdp = Path(td)
+        pyproj = tdp / "pyproject.toml"
+        pyproj.write_text("""
+[tool.poetry.dependencies]
+python = "^3.10"
+requests = "^2.28.0"
+another-fake-dep-7766 = "^2.0"
+""", encoding="utf-8")
+        extracted_p = extract_all_new_dependencies([pyproj], root=tdp, full_repo=True)
+        dep_names = {d.name for d in extracted_p}
+        poetry_ok = "another-fake-dep-7766" in dep_names and "requests" in dep_names and "python" not in dep_names
+    dt = time.time() - t0
+    results.append(
+        TestResult(
+            category="Dependency Analysis",
+            fixture_name="03_poetry_table_parsing",
+            expectation="Parse [tool.poetry.dependencies] unquoted keys",
+            actual=f"Parsed {len(dep_names)} deps: {', '.join(sorted(dep_names))}",
+            passed=poetry_ok,
             duration_seconds=round(dt, 2),
         )
     )

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deployproof"
-version = "1.1.11"
-description = "Deterministic pre-push quality & security verification gate for Python codebases that catches what coverage misses."
+version = "1.1.2"
+description = "Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -13,16 +13,20 @@ authors = [
     { name = "SVS Praveen", email = "svspraveens@gmail.com" }
 ]
 keywords = [
-    "code-quality",
     "mutation-testing",
-    "security-scanner",
+    "pre-push-gate",
+    "self-healing-tests",
+    "ast-mutation-testing",
+    "code-quality",
     "developer-tools",
-    "pre-push-verification",
-    "python-testing",
-    "ast-analysis",
-    "dependency-security",
-    "ai-code",
+    "pytest-plugin",
+    "sast-scanner",
+    "credential-scanner",
+    "supply-chain-security",
     "slopsquatting",
+    "ai-code-defense",
+    "python-testing",
+    "devops-quality-gate",
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -36,11 +40,12 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
     "Topic :: Software Development :: Testing",
 ]
-dependencies = []
+dependencies = [
+    "pytest>=7.0.0",
+]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
     "build>=1.0.0",
     "twine>=4.0.0",
     "coverage>=7.0.0",
@@ -48,7 +53,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/SVSPraveen/DeployProof"
-Documentation = "https://github.com/SVSPraveen/DeployProof#readme"
+Documentation = "https://svspraveen.github.io/DeployProof/"
+Portfolio = "https://svspraveen.vercel.app/"
 Repository = "https://github.com/SVSPraveen/DeployProof.git"
 "Bug Tracker" = "https://github.com/SVSPraveen/DeployProof/issues"
 

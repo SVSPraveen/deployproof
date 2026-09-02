@@ -1,15 +1,18 @@
 # DeployProof
 
-> Deterministic pre-push quality & security gate for modern Python codebases: AST mutation testing, credential scanning, sandbox-escape detection, mock-usage alerts, swallowed-exception checks, and dependency hallucination defense. Built for human engineering teams and AI-assisted workflows alike.
+> Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis. Built for human engineering teams and AI-assisted workflows alike.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v1.1.11-007ec6.svg)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/badge/pypi-v1.1.2-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/DeployProof/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-111%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
-[![Stress Tests](https://img.shields.io/badge/stress%20tests-11%2F11%20passed-2ea44f.svg)](stress_fixtures/)
+[![Tests](https://img.shields.io/badge/tests-261%20passed-2ea44f.svg)](https://github.com/SVSPraveen/DeployProof)
+[![Stress Tests](https://img.shields.io/badge/stress%20tests-14%2F14%20passed-2ea44f.svg)](stress_fixtures/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-DeployProof%20Portal-6366f1.svg)](https://svspraveen.github.io/DeployProof/)
 
 ---
+
+> 📖 **[View the Complete Documentation & Interactive Product Portal](https://svspraveen.github.io/DeployProof/)**
 
 ## Why This Exists
 
@@ -240,27 +243,97 @@ Local Pre-Check Mutation Verification:
 
 Surviving Mutants: None (All generated mutants caught by test suite)
 
-====================================================================
-Notice: Local pre-check only. Full verified score runs in CI on push (via mutmut).
 Pre-check clean: 100% of tested basic mutations caught.
 ```
 
-### CLI Options & Flags
+### Advanced Mutation Operators: DeployProof vs Mutmut vs Cosmic Ray
 
-| Flag | Description |
-|---|---|
-| `deployproof check` | Run all 6 pre-push verification checks (informational warnings for mocks and error handling). |
-| `deployproof check --json` | Output structured, machine-readable JSON for CI/CD pipelines, IDEs, and automation. |
-| `deployproof check --strict-mocks` | Fail the gate (exit code 1) if new `unittest.mock`, `mocker`, or `monkeypatch` usage is introduced. |
-| `deployproof check --strict-error-handling` | Fail the gate (exit code 1) if bare excepts, swallowed exceptions, or dead code are detected. |
-| `deployproof check --files <paths...>` | Explicitly evaluate specific files (bypasses git diff). |
-| `deployproof check --threshold <float>` | Minimum mutation score percentage required to pass (default: `80.0`). |
-| `deployproof check --base <ref>` | Base git ref (branch/commit/tag) to diff against. |
-| `deployproof check --full-repo` | Audit all tracked files across the entire repository root (respecting `.gitignore`), using isolated parallel workers. |
-| `deployproof check --workers <int>` | Set the number of isolated parallel worker processes for `--full-repo` scans (default: auto-detected CPU count capped at 8). |
-| `deployproof check --wsl` | Delegate mutation testing to `mutmut` inside WSL (Windows only). |
+DeployProof features an enterprise-grade AST mutation engine specifically engineered for modern Python applications, AI-assisted development, and instantaneous pre-commit gates:
 
-> **Note:** `deployproof check --wsl` (Windows only) is newer and less battle-tested than the core checks — [file an issue](https://github.com/SVSPraveen/DeployProof/issues) if you hit something.
+| Mutation Category | Operator Transformation | Why It Catches Hard Bugs | DeployProof | mutmut | Cosmic Ray |
+|---|---|---|:---:|:---:|:---:|
+| **Statement Deletion** | `return val` &rarr; `return None`<br>`raise Exc` &rarr; `pass`<br>`assert cond` &rarr; `pass`<br>`call()` &rarr; `pass` | Proves tests assert returned objects, enforce error branches, and verify side-effect calls. | **Yes** | **Yes** | **Yes** |
+| **String Boundary** | `"admin"` &rarr; `"XXadminXX"`<br>`""` &rarr; `"XX"` | Exposes tests that pass only because strings are truthy or never strictly asserted. Docstrings preserved. | **Yes** | **Yes** | Partial |
+| **Argument Swapping** | `func(a, b)` &rarr; `func(b, a)` | Catches signature confusion bugs when parameters share types (e.g. `(user_id, account_id)`). | **Yes** | No | No |
+| **Async / Await Dropping** | `await coro()` &rarr; `coro()` | Exposes unawaited coroutine leaks in modern FastAPI, Starlette, and asyncio code. | **Yes** | No | No |
+| **Context Manager Bypass** | `with lock:` &rarr; *bare body*<br>`async with txn:` &rarr; *bare body* | Proves test suite verifies locks, transaction boundaries, and resource cleanup. | **Yes** | No | No |
+| **Dict Fallback Removal** | `d.get(k, default)` &rarr; `d.get(k, None)` | Catches implicit fallback assumptions where tests never verify default values. | **Yes** | No | No |
+| **Decorator Removal** | `@auth_required` &rarr; *(stripped)*<br>`@lru_cache` &rarr; *(stripped)* | Proves tests verify authentication, caching, validation, and rate-limiting wrappers. | **Yes** | Partial | No |
+| **Loop Control** | `break` &harr; `continue` | Exposes untested loop termination criteria and infinite iteration risks. | **Yes** | No | No |
+| **Unary Inversion** | `not x` &rarr; `x`<br>`-x` &rarr; `+x`<br>`~x` &rarr; `x` | Catches inverted boolean flags, negative coordinate shifts, and bitwise flags. | **Yes** | **Yes** | **Yes** |
+| **Comparison & Identity** | `>=` &rarr; `>`, `<` &rarr; `<=`, `==` &rarr; `!=`<br>`in` &rarr; `not in`, `is` &rarr; `is not` | Detects off-by-one boundary regressions and inverted collection filters. | **Yes** | **Yes** | **Yes** |
+| **Git Diff Speed** | **2 – 5 Seconds** *(Diff-Scoped + Fail-Fast)* | Instant feedback in pre-commit hooks and local developer workflows. | **Yes** | Hours | Hours |
+| **All-in-One Security** | **AST SAST + Leaked Secrets + CVEs + Slopsquatting** | Complete security & test integrity gate in a single tool and report. | **Yes** | No | No |
+
+### Enterprise AST SAST Scanner (OWASP Top 10 Coverage)
+
+DeployProof includes a zero-dependency, high-precision AST SAST engine built natively into the pre-push gate, covering the most critical Python security risks:
+
+| Rule ID | Vulnerability Class | OWASP Category | CWE | Severity | Example Pattern Detected |
+|---|---|---|---|:---:|---|
+| **`DP-SAST-001`** | **Arbitrary Code Execution** | A03:2021-Injection | CWE-95 | `CRITICAL` | `eval(expr)`, `exec(user_code)`, `__import__(name)` |
+| **`DP-SAST-002`** | **Command Injection** | A03:2021-Injection | CWE-78 | `CRITICAL` | `os.system(cmd)`, `os.popen(cmd)`, `pty.spawn(cmd)` |
+| **`DP-SAST-003`** | **Subprocess Command Injection** | A03:2021-Injection | CWE-78 | `HIGH` | `subprocess.run(cmd, shell=True)` |
+| **`DP-SAST-004`** | **Insecure Deserialization** | A08:2021-Integrity | CWE-502 | `CRITICAL` | `pickle.loads(b)`, `marshal.loads(b)`, `shelve.open(p)` |
+| **`DP-SAST-005`** | **Unsafe YAML Deserialization** | A08:2021-Integrity | CWE-502 | `HIGH` | `yaml.load(text)` without `SafeLoader`, `yaml.unsafe_load()` |
+| **`DP-SAST-006`** | **SQL Injection (SQLi)** | A03:2021-Injection | CWE-89 | `HIGH` | `cursor.execute(f"SELECT * WHERE id={id}")` |
+| **`DP-SAST-007`** | **Cross-Site Scripting (XSS) / SSTI** | A03:2021-Injection | CWE-79 | `HIGH` | `Markup(user_input)`, `render_template_string(f"...")` |
+| **`DP-SAST-008`** | **Path Traversal / Arbitrary File Read** | A01:2021-Access Control | CWE-22 | `HIGH` | `open(f"/data/{filename}")`, `shutil.rmtree("/tmp/" + id)` |
+| **`DP-SAST-009`** | **Insecure Cryptographic Algorithms** | A02:2021-Crypto | CWE-327 | `MEDIUM` | `hashlib.md5()`, `hashlib.sha1()`, `Crypto.Cipher.DES` |
+| **`DP-SAST-010`** | **Disabled TLS/SSL Verification** | A05:2021-Misconfiguration | CWE-295 | `HIGH` | `requests.get(url, verify=False)`, `ssl._create_unverified_context()` |
+| **`DP-SAST-011`** | **Production Debug / Global Bindings** | A05:2021-Misconfiguration | CWE-489 | `HIGH` | `app.run(host="0.0.0.0", debug=True)` |
+| **`DP-SAST-012`** | **Insecure Randomness for Secrets** | A07:2021-Auth | CWE-338 | `MEDIUM` | `token = random.randint(...)` (instead of `secrets.token_hex`) |
+| **`DP-SAST-013`** | **XML External Entity (XXE)** | A08:2021-Integrity | CWE-611 | `MEDIUM` | `ElementTree.parse(user_xml)` without `defusedxml` |
+
+---
+
+### Complete CLI Commands & Flags Reference
+
+DeployProof provides a rich command-line interface with fine-grained control over every gate:
+
+#### Core Commands
+
+| Command | Syntax | Description | Default |
+|---|---|---|---|
+| **Check (Default Gate)** | `deployproof check [options]` | Runs all 7 deterministic pre-push verification gates on the modified files in the current git working tree session. | Evaluates git working tree diff against `HEAD` |
+| **Initialize Pre-Push Hook** | `deployproof init` | Automatically installs the DeployProof pre-push hook into `.git/hooks/pre-push` and generates an initial `pyproject.toml` `[tool.deployproof]` configuration block. | Installs executable shell/powershell hook |
+| **Inspect Diff Scope** | `deployproof diff` | Prints the detected git diff status, modified source files, and test files currently in scope without running tests. | Shows current diff session files |
+| **Version** | `deployproof --version` | Displays the current installed version of DeployProof. | Displays `deployproof 1.1.2` |
+| **Help** | `deployproof --help` | Displays full interactive command usage and flag descriptions. | Prints CLI help manual |
+
+#### Mutation Testing & Self-Healing Options
+
+| Flag | Short | Type | Description | Default |
+|---|---|---|---|---|
+| `--threshold <float>` | `-t` | `float` | Minimum mutation score percentage required to pass the verification gate (e.g. `--threshold 85.0`). | `80.0` |
+| `--workers <int>` | `-w` | `int` | Number of isolated parallel worker processes for mutation test sandboxes (e.g. `--workers 12`). | Auto-detected CPU count |
+| `--heal-tests [path]` | | `path` | Synthesizes verified, ready-to-run pytest test cases with boundary inversion heuristics to kill surviving mutants. Output path defaults to `tests/test_deployproof_healed.py`. | Disabled unless specified |
+| `--generate-tests [path]` | | `path` | Alias for `--heal-tests`. | Disabled |
+| `--interactive` | `-i` | `flag` | Interactive quick-fix mode. Prompts in the terminal with single-keystroke `[y/N]` confirmation to automatically inspect and append synthesized tests. | Disabled (auto-detects non-TTY for CI safety) |
+| `--timeout <float>` | | `float` | Maximum timeout in seconds allowed for a single mutant test execution before killing the process. | `10.0`s |
+| `--full-repo` | | `flag` | Audits all tracked Python files across the entire repository root (respecting `.gitignore`), using isolated multi-worker sandboxes. | Diff-scoped to current session |
+| `--files <paths...>` | | `paths` | Explicitly evaluate specific files or directories, completely bypassing git diff resolution. | Git working tree diff |
+| `--base <ref>` | | `string` | Base git reference (branch, commit hash, or tag) to calculate diff against (e.g. `--base origin/main`). | Auto-detected upstream ref |
+| `--wsl` | | `flag` | Delegates mutation testing to native Linux environment inside Windows Subsystem for Linux (WSL). | Native OS execution |
+
+#### Security & Quality Gates
+
+| Flag | Description | Default |
+|---|---|---|
+| `--sast` / `--no-sast` | Enable or disable the AST-based OWASP Top 10 static security analysis scanner. Detects SQLi, command injection, insecure deserialization, path traversals, etc. | Enabled (`true`) |
+| `--scan-git-history` / `--no-scan-git-history` | Scan past git commits using Shannon entropy analysis to catch committed API keys, tokens, and private credentials. | Enabled (`true`) |
+| `--history-depth <int>` | Number of past git commits to analyze when `--scan-git-history` is active. | `50` commits |
+| `--check-cve` / `--no-check-cve` | Query the open OSV (Open Source Vulnerabilities) database in real time for known CVE advisories affecting dependencies. | Enabled (`true`) |
+| `--strict-mocks` / `--no-strict-mocks` | Fail the gate (exit code 1) if modified tests introduce mock imports (`unittest.mock`, `mocker`, `monkeypatch`), proving real behavior instead of mocked stubs. | Disabled (`false`) |
+| `--strict-error-handling` / `--no-strict-error-handling` | Fail the gate (exit code 1) if bare `except:`, swallowed exceptions (`except Exception: pass`), or unreachable dead code are detected. | Disabled (`false`) |
+
+#### Reporting, CI/CD & Configuration
+
+| Flag | Short | Description | Default |
+|---|---|---|---|
+| `--json` | | Output structured machine-readable JSON containing all findings across all 7 verification gates. Ideal for custom CI pipelines, IDE extensions, and dashboards. | Human-readable terminal output |
+| `--github-actions` | `--ci` | Emit inline GitHub Actions annotations (`::error file=...,line=...::`, `::warning::`) on PR diff lines and write a complete Markdown dashboard to `$GITHUB_STEP_SUMMARY`. | Auto-detected when `GITHUB_ACTIONS=true` |
+| `--config <path>` | | Explicit path to a `pyproject.toml` or custom configuration file. | Auto-discovers `pyproject.toml` in repo root |
 
 ### Machine-Readable Output (`--json`)
 
@@ -345,37 +418,69 @@ deployproof check --json
 }
 ```
 
-## What It Checks
+## What It Checks (The 7 Verification Gates)
 
-- **Mutation Score** — Mutates AST operators (`>=`, `==`, `and`, `or`, `*`, numeric constants, comparisons) in modified files and runs your test suite against each mutant. Reports surviving mutants and a percentage score. Does not use line coverage. Features atomic file restoration protected by `SIGINT`/`SIGTERM`/`SIGBREAK` signal handlers to ensure interrupted runs never leave mutated code on disk.
-- **Secrets and Credentials** — Scans modified files for hardcoded API keys (OpenAI, Anthropic, AWS, GitHub, Stripe, private keys) and tracked `.env` files using pattern matching and entropy analysis.
-- **Symlink and Sandbox Escape** — Resolves symbolic links and flags any whose target escapes the repository root (CWE-61 / CWE-451). Catches the class of path-traversal trick used in the GhostApproval disclosure (Wiz Research, July 2026).
-- **Dependency and Slopsquatting** — For each new import, dynamic import (`importlib.import_module`, `__import__`), or manifest entry (including recursive `-r` includes) introduced in the diff, queries the PyPI JSON API and checks registration age. Packages that don't exist (HTTP 404) are flagged HIGH RISK; packages registered within the last 30 days are flagged MEDIUM RISK.
-- **Mock Usage Detection** — Scans test diffs for newly introduced imports or fixture uses of `unittest.mock`, `mocker`, and `monkeypatch`, flagging them for human review with an optional `--strict-mocks` hard gate.
-- **Control Flow and Error Handling** — AST-based detector for bare `except:` without re-raise, silently swallowed broad exceptions (`except Exception:` that only `pass` or log/print without re-raising or returning error indicators), and dead/unreachable code following unconditional `return`, `raise`, `break`, or `continue`, with an optional `--strict-error-handling` hard gate.
+- **Gate 1: In-Memory Schemata Mutation Testing** — Mutates AST operators (`>=`, `==`, `and`, `or`, `*`, numeric constants, string boundaries) and switches mutants in warm RAM (`__DEPLOYPROOF_MUTANT__`), completely bypassing disk I/O.
+- **Gate 2: Actionable Self-Healing Test Synthesis** — When mutants survive, `--heal-tests` and `-i` synthesize ready-to-run `pytest` unit tests with argument inference, class method instantiation, and boundary value checks to eliminate gaps.
+- **Gate 3: AST OWASP Top 10 SAST Scanner** — Scans AST syntax trees for critical security flaws (SQL injection, command execution with `shell=True`, insecure deserialization, SSRF, hardcoded JWT keys).
+- **Gate 4: Secrets & 50-Commit Git History Scanner** — Scans modified files and past 50 git commits for hardcoded API keys (OpenAI, Anthropic, AWS, GitHub, Stripe, private keys) and high-entropy secrets using Shannon entropy analysis.
+- **Gate 5: Dependency CVE & Slopsquatting Defense** — Cross-references dependencies against the OSV vulnerability database and queries PyPI JSON API to detect hallucinated LLM packages.
+- **Gate 6: CWE-61 Symlink Sandbox Escape Gate** — Resolves symbolic links and flags any whose target escapes the repository root (GhostApproval sandbox traversal defense).
+- **Gate 7: Control Flow & Swallowed Exceptions Gate** — AST detector for bare `except:` without re-raise, silently swallowed exceptions (`except Exception: pass`), dead code, and mock leaks (`--strict-mocks`, `--strict-error-handling`).
 
-## What This Doesn't Do
- 
-- **Test-only diffs are not yet caught.** If a diff modifies or weakens assertions in a test file without changing the corresponding source file, DeployProof currently sees zero modified source lines and passes with 0 mutants evaluated. This is a known gap — see [INVESTIGATION_blastradius.md](INVESTIGATION_blastradius.md) for the reverse-mapping approach being evaluated to close it. Until this lands, DeployProof does not protect against test suites being weakened directly.
-- **Diff-scoping vs Full Audits:** Standard `deployproof check` is intentionally scoped strictly to files modified in the active git diff (for 2–5s speed). To audit every file in the entire repository, explicitly pass the `--full-repo` flag.
-- **Python only.** Mutation testing and import extraction currently support Python files only. Other languages are not scanned.
-- **No auto-fix.** DeployProof reports findings; it does not modify your code, rewrite imports, or suggest patches.
-- **No IDE plugin yet.** There is no VS Code extension or JetBrains plugin. The CLI is the interface. IDE integration is on the roadmap.
+## Configuration (`pyproject.toml`)
 
-## See It Catch Real Bugs
+DeployProof natively supports standard PEP 518 `pyproject.toml` configuration under `[tool.deployproof]`:
 
-Clone this repository and run the standalone stress-test suite to see DeployProof evaluate 11 planted edge cases:
-
-```bash
-python stress_fixtures/run_stress_tests.py
+```toml
+[tool.deployproof]
+threshold = 85.0
+workers = 8
+timeout = 15.0
+strict_mocks = true
+strict_error_handling = true
+sast_scanning = true
+history_secrets_scanning = true
+cve_scanning = true
+generate_tests = "tests/test_deployproof_healed.py"
 ```
 
-Fixtures cover weak test suites, zero-test orphan modules, planted OpenAI/AWS credentials, GhostApproval sandbox-escape traps, swallowed exceptions/dead code, and mock-masked broken implementations.
+## CI/CD & Pre-Commit Integration
+
+### GitHub Actions
+Add `.github/workflows/deployproof.yml` to automatically emit PR inline annotations and visual Markdown step summaries:
+
+```yaml
+name: DeployProof Gate
+on: [push, pull_request]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e . && pip install deployproof pytest
+      - run: deployproof check --github-actions --workers 4
+```
+
+### Pre-Commit Framework (.pre-commit-config.yaml)
+```yaml
+repos:
+  - repo: https://github.com/SVSPraveen/DeployProof
+    rev: v1.1.2
+    hooks:
+      - id: deployproof-check
+```
 
 ## Status & Roadmap
 
-- **Current (v1.1.11):** Diff-scoped AST mutation testing (with recursive discovery and `SIGINT`/`SIGTERM`/`SIGBREAK` signal-safe disk restoration), **Full Repository Audit Mode (`--full-repo`)** with isolated parallel multi-worker sandboxes and AST import-graph test discovery, baseline test-collection failure isolation with distinct exit code `2`, entropy-driven value-based secrets scanner, GhostApproval symlink sandbox-escape detector, PyPI dependency hallucination / slopsquatting scanner (with import-to-distribution translation, recursive `-r` requirements scanning, and dynamic import detection via `importlib` / `__import__`), mock-introduction detector (`--strict-mocks`), control-flow / swallowed-exception scanner (`--strict-error-handling`), 11/11 launch-day stress test suite, **111 unit tests**, live unbuffered progress streaming, and machine-readable `--json` output.
-- **Next:** Reverse test-to-source dependency mapping (see `FUTURE_SCOPE.md`), SARIF 2.1.0 PR annotations, and multi-language mutation rule packs.
+- **Current (v1.1.2):** In-Memory AST Schemata Mutation Testing, Actionable Self-Healing Test Synthesizer (`--heal-tests`), Interactive Quick-Fix Mode (`-i`), `pyproject.toml` `[tool.deployproof]` configuration engine, GitHub Actions native inline annotations and `$GITHUB_STEP_SUMMARY` dashboard, `.pre-commit-hooks.yaml` support, Full Repository Audit Mode (`--full-repo`) with isolated multi-worker sandboxes, AST OWASP Top 10 SAST scanner, 50-commit git history secrets scanner, OSV CVE database verification, GhostApproval symlink sandbox escape detector, **261 unit tests**, and complete `/docs` product portal.
+- **Next:** Reverse test-to-source dependency mapping (see `FUTURE_SCOPE.md`), SARIF 2.1.0 report exporter, and multi-language mutation rule packs.
 
 ## Contributing
 
@@ -387,5 +492,5 @@ MIT. See [LICENSE](LICENSE).
 
 ---
 
-*Created by [SVS Praveen](https://github.com/SVSPraveen) · [Portfolio](https://svspraveen.vercel.app/) · [LinkedIn](https://www.linkedin.com/in/svs-praveen-s/)*
+*Created & Architected by [SVS Praveen](https://github.com/SVSPraveen) · [Portfolio](https://svspraveen.vercel.app/) · [LinkedIn](https://www.linkedin.com/in/svs-praveen-s/)*
 

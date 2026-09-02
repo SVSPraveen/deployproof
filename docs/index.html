@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeployProof — Deterministic Pre-Push Quality & Security Gate for Python</title>
+  <meta name="description" content="Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis.">
+  <meta name="keywords" content="python mutation testing, in-memory mutation schemata, pre-push quality gate, self-healing tests, ast mutation testing, pytest mutation testing, owasp sast python, credential scanner, supply chain security, slopsquatting, ai code verification, devops quality gate, python developer tools, svs praveen">
+  <meta name="author" content="SVS Praveen">
+  <link rel="canonical" href="https://svspraveen.github.io/DeployProof/">
+  <meta name="robots" content="index, follow">
+
+  <!-- Open Graph / Facebook / LinkedIn -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://svspraveen.github.io/DeployProof/">
+  <meta property="og:title" content="DeployProof — Deterministic Quality & Security Gate for Modern Python">
+  <meta property="og:description" content="Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis. Created by SVS Praveen.">
+  <meta property="og:image" content="assets/architecture_7_gates.jpg">
+  <meta property="og:site_name" content="DeployProof Documentation">
+
+  <!-- Twitter / X -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="https://svspraveen.github.io/DeployProof/">
+  <meta name="twitter:title" content="DeployProof — Deterministic Quality & Security Gate for Modern Python">
+  <meta name="twitter:description" content="Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis.">
+  <meta name="twitter:image" content="assets/architecture_7_gates.jpg">
+
+  <!-- JSON-LD Structured Data for Google / Search Engines -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "DeployProof",
+    "operatingSystem": "Cross-platform (Linux, macOS, Windows)",
+    "applicationCategory": "DeveloperApplication",
+    "softwareVersion": "1.1.2",
+    "description": "Deterministic pre-push quality and security verification gate for Python codebases featuring in-memory AST mutation testing, credential scanning, and self-healing test synthesis.",
+    "url": "https://svspraveen.github.io/DeployProof/",
+    "downloadUrl": "https://pypi.org/project/deployproof/",
+    "license": "https://opensource.org/licenses/MIT",
+    "author": {
+      "@type": "Person",
+      "name": "SVS Praveen",
+      "url": "https://svspraveen.vercel.app/"
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    }
+  }
+  </script>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@700;800&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Site Header -->
+  <header class="site-header">
+    <div class="brand-container">
+      <a href="#" class="brand-logo">
+        <span>🛡️ DeployProof</span>
+      </a>
+      <span class="brand-badge">v1.1.2</span>
+    </div>
+
+    <nav class="nav-links">
+      <a href="#introduction" class="nav-link">Introduction</a>
+      <a href="#gates" class="nav-link">The 7 Gates</a>
+      <a href="#interactive-gate-explorer" class="nav-link">Gate Explorer</a>
+      <a href="#quickstart" class="nav-link">Quickstart</a>
+      <a href="#ci-cd" class="nav-link">CI/CD</a>
+      <a href="#configuration" class="nav-link">pyproject.toml</a>
+      <a href="#cli-reference" class="nav-link">CLI Reference</a>
+    </nav>
+
+    <div class="header-actions">
+      <button class="search-btn" id="search-trigger" title="Search documentation (Ctrl+K)">
+        <span>🔍 Search docs...</span>
+        <span class="search-kbd">Ctrl K</span>
+      </button>
+
+      <button class="theme-toggle-btn" id="theme-toggle" title="Toggle Light / Dark Theme">
+        <span id="theme-icon">🌙</span>
+      </button>
+
+      <a href="https://github.com/SVSPraveen/DeployProof" target="_blank" rel="noopener" class="github-btn">
+        <span>⭐ GitHub</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <div class="main-wrapper">
+
+    <!-- Sidebar Navigation -->
+    <aside class="docs-sidebar">
+      <div class="sidebar-group">
+        <div class="sidebar-heading">Getting Started</div>
+        <ul class="sidebar-menu">
+          <li class="sidebar-item"><a href="#introduction" class="sidebar-link active">📖 Introduction</a></li>
+          <li class="sidebar-item"><a href="#why-coverage-lies" class="sidebar-link">⚠️ Why Coverage Lies</a></li>
+          <li class="sidebar-item"><a href="#quickstart" class="sidebar-link">🚀 2-Minute Quickstart</a></li>
+          <li class="sidebar-item"><a href="#interactive-gate-explorer" class="sidebar-link">🔬 Interactive Gate Explorer</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-heading">The 7 Verification Gates</div>
+        <ul class="sidebar-menu">
+          <li class="sidebar-item"><a href="#gate-1" class="sidebar-link">🧬 1. In-Memory Mutation</a></li>
+          <li class="sidebar-item"><a href="#gate-2" class="sidebar-link">✨ 2. Self-Healing Tests</a></li>
+          <li class="sidebar-item"><a href="#gate-3" class="sidebar-link">🔒 3. OWASP Top 10 SAST</a></li>
+          <li class="sidebar-item"><a href="#gate-4" class="sidebar-link">🔑 4. Secrets & Git History</a></li>
+          <li class="sidebar-item"><a href="#gate-5" class="sidebar-link">📦 5. OSV CVE & Slop-Check</a></li>
+          <li class="sidebar-item"><a href="#gate-6" class="sidebar-link">🔗 6. Symlink Sandbox Gate</a></li>
+          <li class="sidebar-item"><a href="#gate-7" class="sidebar-link">⚙️ 7. Control Flow & Mocks</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-heading">Workflows & CI/CD</div>
+        <ul class="sidebar-menu">
+          <li class="sidebar-item"><a href="#interactive-mode" class="sidebar-link">🔧 Interactive Quick-Fix</a></li>
+          <li class="sidebar-item"><a href="#github-actions" class="sidebar-link">🤖 GitHub Actions & PRs</a></li>
+          <li class="sidebar-item"><a href="#pre-commit" class="sidebar-link">🪝 Pre-Commit Hook</a></li>
+          <li class="sidebar-item"><a href="#configuration" class="sidebar-link">⚙️ pyproject.toml Setup</a></li>
+        </ul>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-heading">Reference & Architecture</div>
+        <ul class="sidebar-menu">
+          <li class="sidebar-item"><a href="#cli-reference" class="sidebar-link">📋 CLI Flags Reference</a></li>
+          <li class="sidebar-item"><a href="#architecture" class="sidebar-link">🏛️ Architecture & Benchmarks</a></li>
+          <li class="sidebar-item"><a href="#faq" class="sidebar-link">❓ FAQ & Troubleshooting</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="docs-content">
+
+      <!-- Hero Section -->
+      <section id="hero" class="hero-section">
+        <div class="hero-pill">
+          <span>✨ Version 1.1.2 Released &bull; 100% Test Pass Rate (261 Tests)</span>
+        </div>
+        <h1 class="hero-title">
+          The Deterministic Pre-Push Gate for <span class="hero-title-highlight">Modern Python</span>
+        </h1>
+        <p class="hero-subtitle">
+          Catches what line coverage misses. Evaluates in-memory AST mutations, synthesizes ready-to-run pytest unit tests for surviving mutants, scans for OWASP vulnerabilities and leaked credentials, and blocks dependency hallucinations before you push.
+        </p>
+
+        <div class="hero-cta-group">
+          <a href="#quickstart" class="btn-primary">🚀 Get Started in 2 Minutes</a>
+          <a href="#interactive-gate-explorer" class="btn-secondary">🔬 Explore the 7 Gates</a>
+        </div>
+
+        <div class="quick-install-box">
+          <span style="color: var(--text-muted);">$</span>
+          <span class="install-cmd">pipx install deployproof</span>
+          <button class="copy-btn" data-clipboard-text="pipx install deployproof" title="Copy to clipboard">📋 Copy</button>
+        </div>
+      </section>
+
+      <!-- Architecture Hero Diagram Banner (LangGraph Style) -->
+      <div class="doc-banner-container" style="margin: 2rem 0 3rem 0;">
+        <img src="assets/architecture_7_gates.jpg" alt="DeployProof 7 Verification Gates Architecture Diagram" class="doc-diagram-img" />
+        <div class="diagram-caption">Figure 1: The 7 Verification Gates Pipeline Architecture (Diff-Scoped In-Memory Evaluation)</div>
+      </div>
+
+      <!-- Interactive Terminal Playground -->
+      <div class="terminal-widget">
+        <div class="terminal-header">
+          <div class="terminal-dots">
+            <span class="dot dot-red"></span>
+            <span class="dot dot-yellow"></span>
+            <span class="dot dot-green"></span>
+          </div>
+          <div class="terminal-tabs">
+            <button class="term-tab active" data-scenario="check">deployproof check</button>
+            <button class="term-tab" data-scenario="heal">--heal-tests</button>
+            <button class="term-tab" data-scenario="interactive">-i (interactive)</button>
+            <button class="term-tab" data-scenario="init">deployproof init</button>
+          </div>
+        </div>
+        <div class="terminal-body" id="terminal-content">
+          <!-- Populated by app.js -->
+        </div>
+      </div>
+
+      <!-- Introduction Section -->
+      <section id="introduction" class="doc-section">
+        <h2>What is DeployProof?</h2>
+        <p>
+          DeployProof is an uncompromising, deterministic pre-push verification gate that validates whether code changes are <b>mathematically verified by tests</b>, free from security vulnerabilities, and safe to deploy before a single commit reaches your remote repository or CI pipeline.
+        </p>
+
+        <div class="callout callout-important">
+          <div class="callout-icon">🔒</div>
+          <div>
+            <b>Local-Only Privacy & Zero-Telemetry Guarantee:</b> DeployProof runs 100% locally on your machine. It makes zero outbound telemetry calls. No source code, test results, credentials, or file paths ever leave your computer. The only optional network call is querying the official PyPI JSON API to verify package existence.
+          </div>
+        </div>
+
+        <div class="cards-grid">
+          <div class="feature-card">
+            <div class="card-icon">⚡</div>
+            <div class="card-title">2 to 5 Second Diff Speed</div>
+            <div class="card-desc">Scopes AST mutations strictly to modified lines in your git diff, running in milliseconds in your terminal.</div>
+          </div>
+
+          <div class="feature-card">
+            <div class="card-icon">🧬</div>
+            <div class="card-title">In-Memory Schemata</div>
+            <div class="card-desc">Zero disk writes. Switches mutants in warm Python memory via <code>__DEPLOYPROOF_MUTANT__</code> environment switches.</div>
+          </div>
+
+          <div class="feature-card">
+            <div class="card-icon">✨</div>
+            <div class="card-title">Self-Healing Tests</div>
+            <div class="card-desc">Automatically synthesizes ready-to-run <code>pytest</code> unit tests to kill surviving mutants and eliminate test suite gaps.</div>
+          </div>
+
+          <div class="feature-card">
+            <div class="card-icon">🛡️</div>
+            <div class="card-title">7 Security & Quality Gates</div>
+            <div class="card-desc">OWASP Top 10 SAST, Shannon entropy secrets, 50-commit history, symlink escapes, OSV CVEs, and swallowed exceptions.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Why Coverage Lies Section with Infographic -->
+      <section id="why-coverage-lies" class="doc-section">
+        <h2>Why 100% Line Coverage is a Dangerous Lie</h2>
+        <p>
+          Line coverage measures what code was <b>executed</b> by your interpreter, not what code was <b>verified</b> by assertions. An automated test can execute 100% of your codebase without asserting a single value, masking critical vulnerabilities.
+        </p>
+
+        <div class="doc-banner-container" style="margin: 1.5rem 0 2rem 0;">
+          <img src="assets/terminal_findings.jpg" alt="Real DeployProof Diff Scan Detecting Surviving AST Mutants" class="doc-diagram-img" />
+          <div class="diagram-caption">Figure 2: Real-World Terminal Output — DeployProof Detecting Surviving AST Mutants and Unverified Logic</div>
+        </div>
+
+        <div class="callout callout-warning">
+          <div class="callout-icon">⚠️</div>
+          <div>
+            <b>The Real Danger:</b> If your test runs <code>is_admin(user)</code> without checking that non-admins return <code>False</code>, a line coverage tool gives you a green 100% checkmark. DeployProof flips <code>==</code> to <code>!=</code> and alerts you immediately: <b>MUTANT SURVIVED (0% Mutation Score)</b>.
+          </div>
+        </div>
+      </section>
+
+      <!-- Interactive Gate Explorer Widget -->
+      <section id="interactive-gate-explorer" class="doc-section">
+        <h2>🔬 Interactive Gate Explorer</h2>
+        <p>Click any verification gate below to inspect how DeployProof analyzes AST syntax trees, catches security flaws, and synthesizes self-healing tests in real time.</p>
+
+        <div class="explorer-container">
+          <div class="explorer-gate-buttons">
+            <button class="explorer-btn active" data-gate="1">🧬 Gate 1: Mutation Testing</button>
+            <button class="explorer-btn" data-gate="2">✨ Gate 2: Self-Healing Tests</button>
+            <button class="explorer-btn" data-gate="3">🔒 Gate 3: OWASP Top 10 SAST</button>
+            <button class="explorer-btn" data-gate="4">🔑 Gate 4: Secrets & Git History</button>
+            <button class="explorer-btn" data-gate="5">📦 Gate 5: OSV CVE Defense</button>
+            <button class="explorer-btn" data-gate="6">🔗 Gate 6: Symlink Sandbox</button>
+            <button class="explorer-btn" data-gate="7">⚙️ Gate 7: Control Flow Gate</button>
+          </div>
+
+          <div class="explorer-display" id="explorer-display-area">
+            <!-- Dynamic Gate View -->
+          </div>
+        </div>
+      </section>
+
+      <!-- The 7 Verification Gates Deep Dive -->
+      <section id="gates" class="doc-section">
+        <h2>The 7 Verification Gates (Deep Dive)</h2>
+
+        <!-- Gate 1 -->
+        <div id="gate-1" style="margin-bottom: 2.5rem;">
+          <h3>Gate 1: In-Memory Schemata Mutation Testing</h3>
+          <p>
+            Traditional mutation tools write thousands of files to disk, creating heavy I/O bottlenecks. DeployProof compiles all AST mutants into a unified conditional AST in warm RAM, executing tests in parallel across multi-worker sandboxes with zero file locks.
+          </p>
+          <div class="code-box">
+            <div class="code-header"><span>AST In-Memory Schemata Compilation</span><button class="copy-btn" data-clipboard-text="def is_admin(user: dict) -> bool:
+    if os.environ.get('__DEPLOYPROOF_MUTANT__') == '42':
+        return user.get('role') != 'superadmin' # In-Memory Mutation 42
+    return user.get('role') == 'superadmin'">Copy</button></div>
+            <div class="code-body"><pre><code>def is_admin(user: dict) -> bool:
+    if os.environ.get('__DEPLOYPROOF_MUTANT__') == '42':
+        return user.get('role') != 'superadmin' # Mutated in warm memory!
+    return user.get('role') == 'superadmin'</code></pre></div>
+          </div>
+        </div>
+
+        <!-- Gate 2 with Flowchart -->
+        <div id="gate-2" style="margin-bottom: 2.5rem;">
+          <h3>Gate 2: Actionable Self-Healing Test Synthesizer</h3>
+          <p>
+            When a mutant survives your test suite, DeployProof analyzes function signatures, AST types, and boundary conditions to synthesize ready-to-run <code>pytest</code> unit tests automatically with <code>--heal-tests</code>.
+          </p>
+          <div class="doc-banner-container" style="margin: 1.5rem 0 2rem 0;">
+            <img src="assets/command_grid.jpg" alt="DeployProof Verification Suite and Parallel Commands" class="doc-diagram-img" />
+            <div class="diagram-caption">Figure 3: Multi-Command Verification Suite — check, --json, --full-repo, and --heal-tests</div>
+          </div>
+        </div>
+
+        <!-- Gate 3 -->
+        <div id="gate-3" style="margin-bottom: 2.5rem;">
+          <h3>Gate 3: AST OWASP Top 10 SAST Scanner</h3>
+          <p>
+            Inspects AST nodes for high-severity security vulnerabilities including SQL injection, command execution with <code>shell=True</code>, unsafe deserialization (<code>pickle.loads</code>, <code>yaml.load</code> without SafeLoader), SSRF, and hardcoded JWT secrets.
+          </p>
+          <div class="callout callout-note">
+            <div class="callout-icon">🛡️</div>
+            <div>
+              <b>Zero Noise:</b> Scans only newly modified lines in your git diff. Does not complain about legacy code unless touched in the active PR.
+            </div>
+          </div>
+        </div>
+
+        <!-- Gate 4 -->
+        <div id="gate-4" style="margin-bottom: 2.5rem;">
+          <h3>Gate 4: Secrets & 50-Commit Git History Scanner</h3>
+          <p>
+            Combines verified regex patterns for OpenAI, Anthropic, AWS, GitHub, Stripe, and Slack API keys with Shannon entropy analysis ($\text{Entropy} \ge 3.8$) across both the working tree and the past 50 commits.
+          </p>
+        </div>
+
+        <!-- Gate 5 -->
+        <div id="gate-5" style="margin-bottom: 2.5rem;">
+          <h3>Gate 5: Dependency CVE & Slopsquatting Defense</h3>
+          <p>
+            Cross-references dependencies against the OSV vulnerability database and queries the PyPI JSON API to detect hallucinated LLM package names and packages registered within the last 30 days.
+          </p>
+        </div>
+
+        <!-- Gate 6 -->
+        <div id="gate-6" style="margin-bottom: 2.5rem;">
+          <h3>Gate 6: CWE-61 Symlink Sandbox Escape Gate</h3>
+          <p>
+            Resolves all symbolic links and flags any target that traverses outside the repository root, neutralizing sandbox traversal tricks (e.g. GhostApproval disclosure).
+          </p>
+        </div>
+
+        <!-- Gate 7 -->
+        <div id="gate-7" style="margin-bottom: 2.5rem;">
+          <h3>Gate 7: Control Flow & Swallowed Exceptions Gate</h3>
+          <p>
+            Detects blanket <code>except Exception: pass</code> anti-patterns, dead code after unconditional returns, and mock leakages that mask broken production implementations.
+          </p>
+        </div>
+      </section>
+
+      <!-- Quickstart Guide -->
+      <section id="quickstart" class="doc-section">
+        <h2>2-Minute Quickstart</h2>
+        <p>Zero configuration required. Install and verify your changes in seconds.</p>
+
+        <h3>1. Install DeployProof</h3>
+        <div class="code-box">
+          <div class="code-header"><span>BASH</span><button class="copy-btn" data-clipboard-text="pipx install deployproof">Copy</button></div>
+          <div class="code-body"><pre><code># Recommended: Isolated global CLI
+pipx install deployproof
+
+# Or in active virtual environment
+pip install deployproof</code></pre></div>
+        </div>
+
+        <h3>2. Run Verification on Staged Changes</h3>
+        <div class="code-box">
+          <div class="code-header"><span>BASH</span><button class="copy-btn" data-clipboard-text="deployproof check">Copy</button></div>
+          <div class="code-body"><pre><code># Verifies modified files in git diff (completes in 2-5 seconds)
+deployproof check</code></pre></div>
+        </div>
+
+        <h3>3. Install Pre-Push Git Hook</h3>
+        <div class="code-box">
+          <div class="code-header"><span>BASH</span><button class="copy-btn" data-clipboard-text="deployproof init">Copy</button></div>
+          <div class="code-body"><pre><code># Installs .git/hooks/pre-push to automatically guard git push
+deployproof init</code></pre></div>
+        </div>
+      </section>
+
+      <!-- Workflows: Interactive Mode -->
+      <section id="interactive-mode" class="doc-section">
+        <h2>🔧 Interactive Quick-Fix Mode (<code>-i</code> / <code>--interactive</code>)</h2>
+        <p>
+          DeployProof allows you to inspect surviving mutants and apply self-healing tests directly inside your terminal with a single keystroke:
+        </p>
+
+        <div class="code-box">
+          <div class="code-header"><span>TERMINAL INTERACTIVE PROMPT</span><button class="copy-btn" data-clipboard-text="deployproof check -i">Copy</button></div>
+          <div class="code-body"><pre><code>$ deployproof check -i
+
+[?] Fix 1/2: src/auth.py:14 (Missing Key Fallback Assertion)
+    Apply to 'tests/test_auth.py'? [Y/n/q/all] (default: Y): y
+    [+] Appended 'test_kill_verify_roles_line_14' to tests/test_auth.py!
+
+🎉 All self-healing tests applied! Mutation Score: 100.0%</code></pre></div>
+        </div>
+
+        <div class="callout callout-tip">
+          <div class="callout-icon">💡</div>
+          <div>
+            <b>Non-TTY Safety:</b> Interactive mode automatically detects non-interactive CI environments (via <code>sys.stdin.isatty()</code>) and safely skips prompts without hanging builds.
+          </div>
+        </div>
+      </section>
+
+      <!-- CI/CD Integration -->
+      <section id="ci-cd" class="doc-section">
+        <h2>GitHub Actions & CI/CD Recipes</h2>
+        <p>
+          Add <code>.github/workflows/deployproof.yml</code> to automatically annotate pull requests and write rich Markdown step summaries to <code>$GITHUB_STEP_SUMMARY</code>:
+        </p>
+
+        <div class="code-box" id="github-actions">
+          <div class="code-header"><span>.github/workflows/deployproof.yml</span><button class="copy-btn" data-clipboard-text="name: DeployProof Verification Gate
+on: [push, pull_request]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e . && pip install deployproof pytest
+      - run: deployproof check --github-actions --workers 4">Copy</button></div>
+          <div class="code-body"><pre><code>name: DeployProof Verification Gate
+on: [push, pull_request]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -e . && pip install deployproof pytest
+      - run: deployproof check --github-actions --workers 4</code></pre></div>
+        </div>
+
+        <h3 id="pre-commit" style="margin-top: 2rem;">Pre-Commit Framework Integration</h3>
+        <p>Add DeployProof to your <code>.pre-commit-config.yaml</code>:</p>
+        <div class="code-box">
+          <div class="code-header"><span>.pre-commit-config.yaml</span><button class="copy-btn" data-clipboard-text="repos:
+  - repo: https://github.com/SVSPraveen/DeployProof
+    rev: v1.1.2
+    hooks:
+      - id: deployproof-check">Copy</button></div>
+          <div class="code-body"><pre><code>repos:
+  - repo: https://github.com/SVSPraveen/DeployProof
+    rev: v1.1.2
+    hooks:
+      - id: deployproof-check</code></pre></div>
+        </div>
+      </section>
+
+      <!-- Configuration Section -->
+      <section id="configuration" class="doc-section">
+        <h2>Configuration (<code>pyproject.toml</code>)</h2>
+        <p>DeployProof natively supports standard PEP 518 <code>pyproject.toml</code> configuration under <code>[tool.deployproof]</code>:</p>
+
+        <div class="code-box">
+          <div class="code-header"><span>pyproject.toml</span><button class="copy-btn" data-clipboard-text="[tool.deployproof]
+threshold = 85.0
+workers = 8
+timeout = 15.0
+strict_mocks = true
+strict_error_handling = true
+sast_scanning = true
+history_secrets_scanning = true
+cve_scanning = true
+generate_tests = 'tests/test_deployproof_healed.py'">Copy</button></div>
+          <div class="code-body"><pre><code>[tool.deployproof]
+threshold = 85.0
+workers = 8
+timeout = 15.0
+strict_mocks = true
+strict_error_handling = true
+sast_scanning = true
+history_secrets_scanning = true
+cve_scanning = true
+generate_tests = "tests/test_deployproof_healed.py"</code></pre></div>
+        </div>
+
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th>Type</th>
+              <th>Default</th>
+              <th>Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>threshold</code></td>
+              <td><code>float</code></td>
+              <td><code>80.0</code></td>
+              <td>Minimum mutation score percentage required to pass verification gate.</td>
+            </tr>
+            <tr>
+              <td><code>workers</code></td>
+              <td><code>int</code></td>
+              <td><code>CPU count</code></td>
+              <td>Number of parallel worker processes for mutation test sandboxes.</td>
+            </tr>
+            <tr>
+              <td><code>timeout</code></td>
+              <td><code>float</code></td>
+              <td><code>10.0</code></td>
+              <td>Per-mutant test runner timeout in seconds.</td>
+            </tr>
+            <tr>
+              <td><code>strict_mocks</code></td>
+              <td><code>bool</code></td>
+              <td><code>false</code></td>
+              <td>Hard gate blocking newly introduced mock imports in test diffs.</td>
+            </tr>
+            <tr>
+              <td><code>strict_error_handling</code></td>
+              <td><code>bool</code></td>
+              <td><code>false</code></td>
+              <td>Hard gate blocking swallowed exceptions and dead code.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- CLI Reference -->
+      <section id="cli-reference" class="doc-section">
+        <h2>CLI Reference & Commands</h2>
+        <p>DeployProof provides an extensive command-line interface with fine-grained control over all 7 verification gates:</p>
+
+        <h3 style="margin-top: 1.5rem; color: var(--accent);">Core Commands</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Command</th>
+              <th>Syntax</th>
+              <th>Description</th>
+              <th>Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>check</b></td>
+              <td><code>deployproof check [options]</code></td>
+              <td>Runs all 7 deterministic pre-push verification gates on the modified files in the current git working tree session.</td>
+              <td>Diff-scoped check against <code>HEAD</code></td>
+            </tr>
+            <tr>
+              <td><b>init</b></td>
+              <td><code>deployproof init</code></td>
+              <td>Automatically installs the DeployProof pre-push hook into <code>.git/hooks/pre-push</code> and initializes <code>pyproject.toml</code> configuration.</td>
+              <td>Installs executable hook</td>
+            </tr>
+            <tr>
+              <td><b>diff</b></td>
+              <td><code>deployproof diff</code></td>
+              <td>Displays detected git diff status, modified source files, and test files currently in scope without running tests.</td>
+              <td>Current session diff status</td>
+            </tr>
+            <tr>
+              <td><b>--version</b></td>
+              <td><code>deployproof --version</code></td>
+              <td>Displays the current installed version of DeployProof.</td>
+              <td><code>deployproof 1.1.2</code></td>
+            </tr>
+            <tr>
+              <td><b>--help</b></td>
+              <td><code>deployproof --help</code></td>
+              <td>Displays full interactive command usage and flag descriptions.</td>
+              <td>Interactive CLI manual</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top: 2rem; color: var(--accent);">Mutation Testing & Self-Healing Options</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Option / Flag</th>
+              <th>Type</th>
+              <th>Description</th>
+              <th>Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>-t, --threshold FLOAT</code></td>
+              <td><code>float</code></td>
+              <td>Minimum mutation score percentage required to pass verification gate (e.g. <code>--threshold 85.0</code>).</td>
+              <td><code>80.0</code></td>
+            </tr>
+            <tr>
+              <td><code>-w, --workers INT</code></td>
+              <td><code>int</code></td>
+              <td>Number of isolated parallel worker processes for mutation sandboxes (e.g. <code>--workers 12</code>).</td>
+              <td>Auto-detected CPU count</td>
+            </tr>
+            <tr>
+              <td><code>--heal-tests [PATH]</code></td>
+              <td><code>path</code></td>
+              <td>Synthesizes verified, ready-to-run pytest test cases with boundary inversion heuristics to kill surviving mutants.</td>
+              <td><code>tests/test_deployproof_healed.py</code></td>
+            </tr>
+            <tr>
+              <td><code>-i, --interactive</code></td>
+              <td><code>flag</code></td>
+              <td>Interactive terminal prompt with single-keystroke <code>[y/N]</code> confirmation to inspect and append synthesized tests.</td>
+              <td>Disabled (auto-detects CI TTY)</td>
+            </tr>
+            <tr>
+              <td><code>--timeout FLOAT</code></td>
+              <td><code>float</code></td>
+              <td>Per-mutant test runner timeout in seconds.</td>
+              <td><code>10.0</code>s</td>
+            </tr>
+            <tr>
+              <td><code>--full-repo</code></td>
+              <td><code>flag</code></td>
+              <td>Audits all tracked Python files across entire repository root using isolated multi-worker sandboxes.</td>
+              <td>Diff-scoped</td>
+            </tr>
+            <tr>
+              <td><code>--files PATHS...</code></td>
+              <td><code>paths</code></td>
+              <td>Explicitly evaluate specific files or directories, bypassing git diff resolution.</td>
+              <td>Git diff resolution</td>
+            </tr>
+            <tr>
+              <td><code>--base REF</code></td>
+              <td><code>string</code></td>
+              <td>Base git reference (branch, commit hash, or tag) to calculate diff against (e.g. <code>--base origin/main</code>).</td>
+              <td>Auto-detected upstream</td>
+            </tr>
+            <tr>
+              <td><code>--wsl</code></td>
+              <td><code>flag</code></td>
+              <td>Delegates mutation testing to native Linux environment inside WSL (Windows only).</td>
+              <td>Native OS execution</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top: 2rem; color: var(--accent);">Security & Quality Gates</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Flag</th>
+              <th>Description</th>
+              <th>Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>--sast / --no-sast</code></td>
+              <td>Enable or disable the AST-based OWASP Top 10 static security analysis scanner (SQLi, command injection, insecure deserialization, path traversals).</td>
+              <td>Enabled (<code>true</code>)</td>
+            </tr>
+            <tr>
+              <td><code>--scan-git-history / --no-scan-git-history</code></td>
+              <td>Scan past git commits using Shannon entropy analysis to catch committed API keys, tokens, and credentials.</td>
+              <td>Enabled (<code>true</code>)</td>
+            </tr>
+            <tr>
+              <td><code>--history-depth INT</code></td>
+              <td>Number of past git commits to analyze for credential leaks.</td>
+              <td><code>50</code> commits</td>
+            </tr>
+            <tr>
+              <td><code>--check-cve / --no-check-cve</code></td>
+              <td>Query the open OSV database in real time for known CVE advisories affecting dependencies.</td>
+              <td>Enabled (<code>true</code>)</td>
+            </tr>
+            <tr>
+              <td><code>--strict-mocks / --no-strict-mocks</code></td>
+              <td>Fail the gate (exit code 1) if modified tests introduce mock imports (<code>unittest.mock</code>, <code>mocker</code>, <code>monkeypatch</code>).</td>
+              <td>Disabled (<code>false</code>)</td>
+            </tr>
+            <tr>
+              <td><code>--strict-error-handling / --no-strict-error-handling</code></td>
+              <td>Fail the gate (exit code 1) if bare <code>except:</code>, swallowed exceptions, or unreachable code are detected.</td>
+              <td>Disabled (<code>false</code>)</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3 style="margin-top: 2rem; color: var(--accent);">Reporting, CI/CD & Configuration</h3>
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Flag</th>
+              <th>Description</th>
+              <th>Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>--json</code></td>
+              <td>Output structured machine-readable JSON containing all findings across all 7 verification gates.</td>
+              <td>Terminal table output</td>
+            </tr>
+            <tr>
+              <td><code>--github-actions, --ci</code></td>
+              <td>Emit inline GitHub Actions PR annotations (<code>::error::</code>, <code>::warning::</code>) and write rich Markdown step summaries to <code>$GITHUB_STEP_SUMMARY</code>.</td>
+              <td>Auto-detected in GitHub Actions</td>
+            </tr>
+            <tr>
+              <td><code>--config PATH</code></td>
+              <td>Explicit path to a <code>pyproject.toml</code> or custom configuration file.</td>
+              <td>Auto-discovers <code>pyproject.toml</code> in root</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Architecture & Benchmarks -->
+      <section id="architecture" class="doc-section">
+        <h2>Architecture & Benchmarks</h2>
+        <p>
+          Traditional mutation testing tools (like <code>mutmut</code> or <code>Cosmic Ray</code>) take <b>8+ hours</b> to evaluate large codebases on Windows because of NTFS disk write bottlenecks. DeployProof's <b>in-memory schemata engine</b> compiles all mutants into warm RAM, achieving a <b>10x speedup</b>.
+        </p>
+
+        <table class="doc-table">
+          <thead>
+            <tr>
+              <th>Engine Feature</th>
+              <th>Traditional Mutation Tools</th>
+              <th>🛡️ DeployProof</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><b>Mutation Execution</b></td>
+              <td>Slow disk writes per mutant on NTFS</td>
+              <td><b>In-Memory AST Schemata in Warm RAM</b></td>
+            </tr>
+            <tr>
+              <td><b>Test Selection</b></td>
+              <td>Runs all tests sequentially</td>
+              <td><b>Per-line dynamic test context targeting</b></td>
+            </tr>
+            <tr>
+              <td><b>Worker Sandboxes</b></td>
+              <td>Shared file locks / collisions</td>
+              <td><b>Isolated PID-keyed sandboxes</b></td>
+            </tr>
+            <tr>
+              <td><b>Test Synthesizer</b></td>
+              <td>None (Manual test writing)</td>
+              <td><b>Automated Self-Healing Pytest Synthesizer</b></td>
+            </tr>
+            <tr>
+              <td><b>Security Gates</b></td>
+              <td>Mutation only (Zero security)</td>
+              <td><b>SAST + Secrets + CVEs + Symlink Gate</b></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="doc-banner-container" style="margin: 1.5rem 0 2rem 0;">
+          <img src="assets/terminal_perfect.jpg" alt="DeployProof 100% Pre-Push Verification Certification" class="doc-diagram-img" />
+          <div class="diagram-caption">Figure 4: DeployProof 100% Pre-Push Verification Gate Certification (All 7 Gates Passed)</div>
+        </div>
+      </section>
+
+      <!-- FAQ Section -->
+      <section id="faq" class="doc-section">
+        <h2>Frequently Asked Questions</h2>
+
+        <h3>Does DeployProof make any outbound network requests?</h3>
+        <p>
+          DeployProof is 100% local-first and zero-telemetry. No code or results ever leave your machine. The only optional network call is querying the official PyPI JSON API to verify that newly introduced dependencies exist and are not hallucinated by LLMs.
+        </p>
+
+        <h3>How is DeployProof so fast on large projects?</h3>
+        <p>
+          DeployProof defaults to <b>diff-scoped verification</b>, mutating only the lines modified in your active session. For full repository audits, it utilizes in-memory AST schemata compilation and multi-worker parallelism across your CPU cores.
+        </p>
+
+        <h3>Can DeployProof run in CI/CD pipelines?</h3>
+        <p>
+          Yes! With <code>--github-actions</code> or <code>--ci</code>, DeployProof automatically outputs GitHub PR inline annotations and publishes visual summary dashboard tables to <code>$GITHUB_STEP_SUMMARY</code>.
+        </p>
+      </section>
+
+    </main>
+
+    <!-- Table of Contents (On this page) -->
+    <aside class="docs-toc">
+      <div class="toc-title">On this page</div>
+      <ul class="toc-list" id="toc-list">
+        <li class="toc-item"><a href="#hero" class="toc-link">Overview</a></li>
+        <li class="toc-item"><a href="#introduction" class="toc-link">What is DeployProof?</a></li>
+        <li class="toc-item"><a href="#why-coverage-lies" class="toc-link">Why Coverage Lies</a></li>
+        <li class="toc-item"><a href="#interactive-gate-explorer" class="toc-link">Gate Explorer</a></li>
+        <li class="toc-item"><a href="#gates" class="toc-link">The 7 Gates</a></li>
+        <li class="toc-item"><a href="#quickstart" class="toc-link">Quickstart</a></li>
+        <li class="toc-item"><a href="#interactive-mode" class="toc-link">Interactive Mode</a></li>
+        <li class="toc-item"><a href="#ci-cd" class="toc-link">CI/CD Integration</a></li>
+        <li class="toc-item"><a href="#configuration" class="toc-link">Configuration</a></li>
+        <li class="toc-item"><a href="#cli-reference" class="toc-link">CLI Reference</a></li>
+        <li class="toc-item"><a href="#architecture" class="toc-link">Architecture & Benchmarks</a></li>
+        <li class="toc-item"><a href="#faq" class="toc-link">FAQ</a></li>
+      </ul>
+    </aside>
+
+  </div>
+
+  <!-- Search Modal Backdrop (Ctrl+K) -->
+  <div class="search-modal-backdrop" id="search-modal">
+    <div class="search-modal">
+      <div class="search-input-box">
+        <span>🔍</span>
+        <input type="text" id="search-input" class="search-input" placeholder="Search documentation, gates, CLI flags, CI/CD..." autocomplete="off" />
+        <span class="search-kbd">ESC</span>
+      </div>
+      <ul class="search-results-list" id="search-results">
+        <!-- Populated dynamically by app.js -->
+      </ul>
+    </div>
+  </div>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="footer-container">
+      <div class="footer-col">
+        <div class="brand-logo" style="margin-bottom: 0.75rem;">🛡️ DeployProof</div>
+        <p style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.6; max-width: 320px;">
+          Deterministic pre-push quality & security gate for modern Python codebases. In-memory AST mutation testing, credential scanning, and self-healing test synthesis.
+        </p>
+      </div>
+
+      <div class="footer-col">
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="#introduction">Introduction</a></li>
+          <li><a href="#why-coverage-lies">Why Coverage Lies</a></li>
+          <li><a href="#gates">The 7 Gates</a></li>
+          <li><a href="#quickstart">2-Minute Quickstart</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h4>Workflows</h4>
+        <ul>
+          <li><a href="#github-actions">GitHub Actions</a></li>
+          <li><a href="#pre-commit">Pre-Commit Hook</a></li>
+          <li><a href="#configuration">pyproject.toml</a></li>
+          <li><a href="#interactive-mode">Interactive Mode</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h4>Project</h4>
+        <ul>
+          <li><a href="https://github.com/SVSPraveen/DeployProof" target="_blank" rel="noopener">GitHub Repository</a></li>
+          <li><a href="https://pypi.org/project/deployproof/" target="_blank" rel="noopener">PyPI Package</a></li>
+          <li><a href="https://github.com/SVSPraveen/DeployProof/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
+          <li><a href="https://github.com/SVSPraveen/DeployProof/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <div>Released under the MIT License. &bull; Created & Architected by <a href="https://svspraveen.vercel.app/" target="_blank" rel="noopener">SVS Praveen</a> (<a href="https://github.com/SVSPraveen" target="_blank" rel="noopener">GitHub</a> &bull; <a href="https://www.linkedin.com/in/svs-praveen-s/" target="_blank" rel="noopener">LinkedIn</a>).</div>
+      <div>DeployProof v1.1.2</div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

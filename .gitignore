@@ -20,6 +20,12 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+*.whl
+*.tar.gz
+
+# Patch and Archive files
+*.patch
+*.zip
 
 # Virtual environments and local env
 venv/
@@ -42,24 +48,36 @@ scratch/
 .coverage
 .coverage.*
 htmlcov/
+coverage.xml
 .tox/
 .nox/
 .mutmut-cache/
+.mypy_cache/
+.ruff_cache/
 
-# IDE and OS files
+# Local synthesized test output
+tests/test_deployproof_healed.py
+
+# IDE, OS and Editor files
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Blastradius generated files
+# DeployProof Local Artifacts
+.deployproof.json
+.blastradius/
 blastradius.json
 symbolindex.json
-.blastradius/
+
+# Local logs and recordings
+*.log
+*.cast
+*.gif
 
 # Local manual test folders
 Test purpose/
 deployproof-demo.*
 demo.*
-*.cast
-*.gif

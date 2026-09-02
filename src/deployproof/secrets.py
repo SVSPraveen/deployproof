@@ -166,6 +166,57 @@ def is_non_secret_code_or_schema(val: str, is_quoted: bool, file_path: Path) -> 
     return False
 
 
+def scan_text_for_secrets(text: str, file_path: Path, line_number: int = 1) -> List[SecretFinding]:
+    """Scan a single text line or string snippet for secrets and credentials."""
+    findings: List[SecretFinding] = []
+    stripped = text.strip()
+    if not stripped or stripped.startswith("#") or stripped.startswith("//"):
+        return findings
+
+    matched_known = False
+    for rule_name, pattern, desc in KNOWN_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            matched_str = match.group(1)
+            if not is_placeholder(matched_str):
+                findings.append(
+                    SecretFinding(
+                        file_path=file_path,
+                        line_number=line_number,
+                        rule_name=rule_name,
+                        description=desc,
+                        redacted_value=redact_secret(matched_str),
+                        snippet=stripped,
+                    )
+                )
+                matched_known = True
+
+    if not matched_known:
+        assignment_match = GENERIC_ASSIGNMENT_PATTERN.search(text)
+        if assignment_match:
+            var_name = assignment_match.group(1)
+            quoted_val = assignment_match.group(2)
+            unquoted_val = assignment_match.group(3)
+            is_quoted = quoted_val is not None
+            secret_val = quoted_val if is_quoted else unquoted_val
+            if secret_val and CREDENTIAL_VAR_RE.match(var_name):
+                if not is_placeholder(secret_val) and not is_non_secret_code_or_schema(secret_val, is_quoted, file_path):
+                    entropy = calculate_shannon_entropy(secret_val)
+                    if entropy >= 3.8:
+                        findings.append(
+                            SecretFinding(
+                                file_path=file_path,
+                                line_number=line_number,
+                                rule_name="High-Entropy Credential Assignment",
+                                description=f"High-entropy credential assigned to '{var_name}' (entropy: {entropy:.2f})",
+                                redacted_value=redact_secret(secret_val),
+                                snippet=stripped,
+                            )
+                        )
+
+    return findings
+
+
 def scan_file_for_secrets(file_path: Path) -> List[SecretFinding]:
     """Scan a single file for credentials, keys, or .env tracking."""
     findings: List[SecretFinding] = []
@@ -192,54 +243,7 @@ def scan_file_for_secrets(file_path: Path) -> List[SecretFinding]:
 
     lines = content.splitlines()
     for line_idx, line in enumerate(lines, 1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or stripped.startswith("//"):
-            # Skip empty lines and full line comments
-            continue
-
-        # Check known regex patterns
-        matched_known = False
-        for rule_name, pattern, desc in KNOWN_PATTERNS:
-            match = pattern.search(line)
-            if match:
-                matched_str = match.group(1)
-                if not is_placeholder(matched_str):
-                    findings.append(
-                        SecretFinding(
-                            file_path=file_path,
-                            line_number=line_idx,
-                            rule_name=rule_name,
-                            description=desc,
-                            redacted_value=redact_secret(matched_str),
-                            snippet=stripped,
-                        )
-                    )
-                    matched_known = True
-
-        # Check generic high-entropy secret assignments
-        if not matched_known:
-            assignment_match = GENERIC_ASSIGNMENT_PATTERN.search(line)
-            if assignment_match:
-                var_name = assignment_match.group(1)
-                quoted_val = assignment_match.group(2)
-                unquoted_val = assignment_match.group(3)
-                is_quoted = quoted_val is not None
-                secret_val = quoted_val if is_quoted else unquoted_val
-                if secret_val and CREDENTIAL_VAR_RE.match(var_name):
-                    if not is_placeholder(secret_val) and not is_non_secret_code_or_schema(secret_val, is_quoted, file_path):
-                        entropy = calculate_shannon_entropy(secret_val)
-                        # Strings with length >= 16 and entropy >= 3.8 indicate high-entropy random credentials
-                        if entropy >= 3.8:
-                            findings.append(
-                                SecretFinding(
-                                    file_path=file_path,
-                                    line_number=line_idx,
-                                    rule_name="High-Entropy Credential Assignment",
-                                    description=f"High-entropy credential assigned to '{var_name}' (entropy: {entropy:.2f})",
-                                    redacted_value=redact_secret(secret_val),
-                                    snippet=stripped,
-                                )
-                            )
+        findings.extend(scan_text_for_secrets(line, file_path, line_idx))
 
     return findings
 

@@ -105,15 +105,20 @@ def inspect_symlink(
 ) -> SymlinkFinding:
     """Analyze a symlink to verify whether its resolved target escapes repo root."""
     resolved_root = repo_root.resolve()
+    raw_str = str(raw_target).strip()
 
     # Determine resolved absolute target
-    if symlink_path.is_symlink() or os.path.islink(symlink_path):
+    raw_p = Path(raw_str)
+    if raw_p.is_absolute() or raw_str.startswith("/") or raw_str.startswith("\\"):
+        # Explicit absolute path target (e.g., /etc/passwd, C:\Windows, /var/secrets)
+        resolved_target = raw_p.resolve()
+    elif symlink_path.is_symlink() or os.path.islink(symlink_path):
         try:
-            resolved_target = symlink_path.resolve()
+            resolved_target = Path(os.path.realpath(symlink_path)).resolve()
         except Exception:
-            resolved_target = (symlink_path.parent / raw_target).resolve()
+            resolved_target = (symlink_path.parent / raw_str).resolve()
     else:
-        resolved_target = (symlink_path.parent / raw_target).resolve()
+        resolved_target = (symlink_path.parent / raw_str).resolve()
 
     # Check if target escapes repository root
     try:

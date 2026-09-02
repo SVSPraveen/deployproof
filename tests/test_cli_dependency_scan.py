@@ -298,6 +298,14 @@ def test_cli_dynamic_import_non_literal_variable_warning(tmp_path: Path, capsys,
         encoding="utf-8",
     )
 
+    test_py = tmp_path / "test_app.py"
+    test_py.write_text(
+        "from app import load_plugin\n"
+        "def test_plugin():\n"
+        "    assert load_plugin('math') is not None\n",
+        encoding="utf-8",
+    )
+
     exit_code = main(["check", "--files", str(app_py)])
     captured = capsys.readouterr()
 

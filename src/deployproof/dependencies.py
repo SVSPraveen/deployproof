@@ -354,6 +354,8 @@ MANIFEST_FILENAMES = {
     "requirements.txt",
     "setup.py",
     "setup.cfg",
+    "Pipfile",
+    "pipfile",
 }
 
 
@@ -817,7 +819,8 @@ def _parse_requirements_file(
         if raw_line.startswith(("-f ", "-i ", "--", "-e ")):
             continue
 
-        m = req_name_re.match(raw_line)
+        cleaned_line = raw_line.split("--hash")[0].strip().rstrip("\\").strip()
+        m = req_name_re.match(cleaned_line)
         if m:
             pkg_name = m.group(1).strip()
             if not is_stdlib_or_internal(pkg_name) and pkg_name not in local_modules:
@@ -838,6 +841,89 @@ def _parse_requirements_file(
     return extracted
 
 
+def _parse_poetry_or_pdm_lock(
+    file_path: Path,
+    root: Path,
+    local_modules: Set[str],
+    added_linenos: Optional[Set[int]] = None,
+) -> List[ExtractedDependency]:
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return []
+
+    extracted: List[ExtractedDependency] = []
+    lines = content.splitlines()
+    in_package = False
+    pkg_lineno = None
+
+    for idx, line in enumerate(lines, start=1):
+        raw = line.strip()
+        if raw.startswith("[[package]]"):
+            in_package = True
+            pkg_lineno = idx
+            continue
+        elif raw.startswith("[[") or (raw.startswith("[") and not raw.startswith("[package.")):
+            in_package = False
+
+        if in_package and raw.startswith("name = "):
+            m = re.match(r'^name\s*=\s*["\']([^"\']+)["\']', raw)
+            if m:
+                cand = m.group(1).strip()
+                if not is_stdlib_or_internal(cand) and cand not in local_modules:
+                    if added_linenos is None or idx in added_linenos or (pkg_lineno and pkg_lineno in added_linenos):
+                        try:
+                            rel_source_type = file_path.relative_to(root).as_posix()
+                        except ValueError:
+                            rel_source_type = file_path.name
+                        extracted.append(
+                            ExtractedDependency(
+                                name=normalize_package_name(cand),
+                                import_name=cand,
+                                source_file=file_path,
+                                lineno=idx,
+                                source_type=rel_source_type,
+                            )
+                        )
+    return extracted
+
+
+def _parse_pipfile_lock(
+    file_path: Path,
+    root: Path,
+    local_modules: Set[str],
+    added_linenos: Optional[Set[int]] = None,
+) -> List[ExtractedDependency]:
+    try:
+        import json
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        data = json.loads(content)
+    except Exception:
+        return []
+
+    extracted: List[ExtractedDependency] = []
+    try:
+        rel_source_type = file_path.relative_to(root).as_posix()
+    except ValueError:
+        rel_source_type = file_path.name
+
+    for section in ("default", "develop"):
+        pkgs = data.get(section, {})
+        if isinstance(pkgs, dict):
+            for cand in pkgs:
+                if not is_stdlib_or_internal(cand) and cand not in local_modules:
+                    extracted.append(
+                        ExtractedDependency(
+                            name=normalize_package_name(cand),
+                            import_name=cand,
+                            source_file=file_path,
+                            lineno=1,
+                            source_type=rel_source_type,
+                        )
+                    )
+    return extracted
+
+
 def extract_new_manifest_dependencies(
     file_path: Path,
     root: Path,
@@ -846,7 +932,7 @@ def extract_new_manifest_dependencies(
     full_repo: bool = False,
 ) -> List[ExtractedDependency]:
     """
-    Extract external dependencies from modified manifest files (requirements.txt, pyproject.toml, etc.).
+    Extract external dependencies from modified manifest and lock files.
     """
     if local_modules is None:
         local_modules = get_local_module_names(root)
@@ -854,16 +940,35 @@ def extract_new_manifest_dependencies(
     name = file_path.name.lower()
     is_requirements = is_requirements_manifest_file(file_path)
     is_pyproject = name == "pyproject.toml"
+    is_pipfile = name == "pipfile"
+    is_pipfile_lock = name == "pipfile.lock"
+    is_poetry_lock = name == "poetry.lock" or name in ("pdm.lock", "uv.lock")
     is_setup_py = name == "setup.py"
     is_setup_cfg = name == "setup.cfg"
 
-    if not (is_requirements or is_pyproject or is_setup_py or is_setup_cfg):
+    if not (is_requirements or is_pyproject or is_pipfile or is_pipfile_lock or is_poetry_lock or is_setup_py or is_setup_cfg):
         return []
 
     added_linenos = None if full_repo else get_added_linenos_for_file(file_path, root, base=base)
 
     if is_requirements:
         return _parse_requirements_file(
+            file_path=file_path,
+            root=root,
+            local_modules=local_modules,
+            added_linenos=added_linenos,
+        )
+
+    if is_poetry_lock:
+        return _parse_poetry_or_pdm_lock(
+            file_path=file_path,
+            root=root,
+            local_modules=local_modules,
+            added_linenos=added_linenos,
+        )
+
+    if is_pipfile_lock:
+        return _parse_pipfile_lock(
             file_path=file_path,
             root=root,
             local_modules=local_modules,
@@ -878,6 +983,7 @@ def extract_new_manifest_dependencies(
     extracted: List[ExtractedDependency] = []
     lines = content.splitlines()
     dep_str_re = re.compile(r"""["']([A-Za-z0-9_\-\.]+)(?:[>=<!~;\[\s"']|$)""")
+    dep_key_re = re.compile(r"""^["']?([A-Za-z0-9_\-\.]+)["']?\s*=""")
 
     in_dependency_section = False
     in_dependency_array = False
@@ -886,11 +992,34 @@ def extract_new_manifest_dependencies(
         raw_line = line.strip()
         lower_line = raw_line.lower()
 
-        if is_pyproject:
+        if is_pipfile:
+            if raw_line.startswith("[") and raw_line.endswith("]"):
+                header = raw_line.strip("[]").strip().lower()
+                in_dependency_section = header in ("packages", "dev-packages")
+                continue
+
+            if in_dependency_section:
+                if added_linenos is None or idx in added_linenos:
+                    m_key = dep_key_re.match(raw_line)
+                    if m_key:
+                        pkg_name = m_key.group(1).strip()
+                        if pkg_name.lower() not in ("packages", "dev-packages", "version", "name", "python"):
+                            if not is_stdlib_or_internal(pkg_name) and pkg_name not in local_modules:
+                                extracted.append(
+                                    ExtractedDependency(
+                                        name=normalize_package_name(pkg_name),
+                                        import_name=pkg_name,
+                                        source_file=file_path,
+                                        lineno=idx,
+                                        source_type=file_path.name,
+                                    )
+                                )
+
+        elif is_pyproject:
             # Check section headers
             if raw_line.startswith("[") and raw_line.endswith("]"):
                 header = raw_line.strip("[]").strip().lower()
-                if "dependencies" in header or header.endswith(".dependencies") or "optional-dependencies" in header:
+                if "dependencies" in header or header.endswith(".dependencies") or "optional-dependencies" in header or "tool.poetry" in header:
                     in_dependency_section = True
                 else:
                     in_dependency_section = False
@@ -903,27 +1032,36 @@ def extract_new_manifest_dependencies(
                 in_dependency_array = True
 
             if in_dependency_array and "]" in raw_line:
-                # End of array on this line (we still parse this line below)
                 array_ended_here = True
             else:
                 array_ended_here = False
 
             if in_dependency_section or in_dependency_array:
                 if added_linenos is None or idx in added_linenos:
-                    m = dep_str_re.search(raw_line)
-                    if m:
-                        pkg_name = m.group(1).strip()
-                        if pkg_name.lower() not in ("dependencies", "install_requires", "requires", "version", "name"):
-                            if not is_stdlib_or_internal(pkg_name) and pkg_name not in local_modules:
-                                extracted.append(
-                                    ExtractedDependency(
-                                        name=normalize_package_name(pkg_name),
-                                        import_name=pkg_name,
-                                        source_file=file_path,
-                                        lineno=idx,
-                                        source_type=file_path.name,
-                                    )
+                    pkg_name = None
+                    m_key = dep_key_re.match(raw_line)
+                    if m_key:
+                        cand = m_key.group(1).strip()
+                        if cand.lower() not in ("dependencies", "install_requires", "requires", "version", "name", "python"):
+                            pkg_name = cand
+                    elif in_dependency_array:
+                        m_str = dep_str_re.search(raw_line)
+                        if m_str:
+                            cand = m_str.group(1).strip()
+                            if cand.lower() not in ("dependencies", "install_requires", "requires", "version", "name", "python"):
+                                pkg_name = cand
+
+                    if pkg_name:
+                        if not is_stdlib_or_internal(pkg_name) and pkg_name not in local_modules:
+                            extracted.append(
+                                ExtractedDependency(
+                                    name=normalize_package_name(pkg_name),
+                                    import_name=pkg_name,
+                                    source_file=file_path,
+                                    lineno=idx,
+                                    source_type=file_path.name,
                                 )
+                            )
 
             if array_ended_here:
                 in_dependency_array = False
@@ -1050,7 +1188,7 @@ def query_pypi_registry(
     try:
         from deployproof import __version__
     except ImportError:
-        __version__ = "1.1.11"
+        __version__ = "1.1.2"
 
     url = f"https://pypi.org/pypi/{canonical_pkg}/json"
     req = urllib.request.Request(
@@ -1134,19 +1272,96 @@ def query_pypi_registry(
     return result
 
 
+def _get_pypi_disk_cache_path() -> Path:
+    """Get persistent on-disk PyPI metadata cache path."""
+    cache_dir = Path.home() / ".cache" / "deployproof"
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / "pypi_cache.json"
+    except Exception:
+        return Path.cwd() / ".deployproof_pypi_cache.json"
+
+
+def _load_pypi_disk_cache() -> Dict[str, dict]:
+    """Load persistent PyPI metadata cache with TTL filtering."""
+    import time
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("DEPLOYPROOF_DISABLE_CACHE"):
+        return {}
+    cache_path = _get_pypi_disk_cache_path()
+    if not cache_path.exists():
+        return {}
+    try:
+        import json
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        now = time.time()
+        # 7-day TTL (604,800 seconds)
+        return {k: v for k, v in data.items() if isinstance(v, dict) and now - v.get("ts", 0) < 604800}
+    except Exception:
+        return {}
+
+
+def _save_pypi_disk_cache(cache_data: Dict[str, dict]) -> None:
+    """Save persistent PyPI metadata cache to disk."""
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("DEPLOYPROOF_DISABLE_CACHE"):
+        return
+    try:
+        import json
+        cache_path = _get_pypi_disk_cache_path()
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(cache_data, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def scan_dependencies(
     extracted_deps: List[ExtractedDependency],
     timeout: float = 5.0,
+    use_cache: bool = True,
 ) -> DependencyScanSummary:
     """
-    Perform slopsquatting and hallucination verification against PyPI for all extracted dependencies.
+    Perform slopsquatting and hallucination verification against PyPI for all extracted dependencies
+    with persistent on-disk caching and parallel ThreadPoolExecutor lookups.
     """
     import time
+    from concurrent.futures import ThreadPoolExecutor
 
     start_time = time.time()
-    cache: Dict[str, tuple] = {}
-    findings: List[DependencyCheckResult] = []
+    disk_cache = _load_pypi_disk_cache()
+    mem_cache: Dict[str, tuple] = {}
 
+    # Seed in-memory cache with valid disk cache entries
+    for k, v in disk_cache.items():
+        mem_cache[k] = (v.get("status"), v.get("age_days"), v.get("first_date"), v.get("details"))
+
+    # Identify unique packages that require network query
+    scannable_deps = [d for d in extracted_deps if not d.unscanned_reason]
+    unique_names = list({d.name.strip() for d in scannable_deps if d.name.strip() not in mem_cache})
+
+    if unique_names:
+        workers = min(10, max(1, len(unique_names)))
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_name = {
+                executor.submit(query_pypi_registry, name, cache=None, timeout=timeout): name
+                for name in unique_names
+            }
+            for future in future_to_name:
+                name = future_to_name[future]
+                try:
+                    res = future.result()
+                    mem_cache[name] = res
+                    disk_cache[name] = {
+                        "status": res[0],
+                        "age_days": res[1],
+                        "first_date": res[2],
+                        "details": res[3],
+                        "ts": time.time(),
+                    }
+                except Exception as e:
+                    mem_cache[name] = ("UNKNOWN", None, None, f"Query error: {str(e)}")
+
+        _save_pypi_disk_cache(disk_cache)
+
+    findings: List[DependencyCheckResult] = []
     high_risk = 0
     medium_risk = 0
     ok_count = 0
@@ -1171,7 +1386,11 @@ def scan_dependencies(
             )
             continue
 
-        status, age_days, first_date, details = query_pypi_registry(dep.name, cache=cache, timeout=timeout)
+        norm_name = dep.name.strip()
+        if norm_name in mem_cache:
+            status, age_days, first_date, details = mem_cache[norm_name]
+        else:
+            status, age_days, first_date, details = query_pypi_registry(norm_name, cache=mem_cache, timeout=timeout)
 
         if status == "HIGH_RISK":
             high_risk += 1

@@ -23,14 +23,14 @@ Mutation testing is computationally expensive if run across an entire repository
 |---|---|---|---|
 | **1. Diff against default branch (`main`/`master`)** | `git diff main...HEAD` | Captures full branch delta for PRs. | Fails if `main` branch does not exist locally; fails on fresh repos before first push; ignores uncommitted working-tree edits; too broad for long-lived branches. |
 | **2. Diff against `HEAD~1` (last commit only)** | `git diff HEAD~1` | Fast; captures the immediate last commit. | Crashes with fatal git error on fresh repositories with only 1 commit; completely ignores unstaged/staged working-tree changes mid-session. |
-| **3. `--base <ref>` flag** | `git diff <ref>...HEAD` | Precise and essential for CI / PR pipelines. | As a mandatory requirement, introduces CLI friction for local solo developers who just want to run `deployproof check`. |
-| **4. Diff against working tree (uncommitted changes)** | `git diff HEAD` + untracked | Directly matches mid-session AI edits before committing. | If the developer commits their files *before* running `deployproof check`, working-tree diff produces 0 files. |
+| **3. `--base <ref>` flag** | `git diff <ref>...HEAD` | Precise and essential for CI / PR pipelines. | As a mandatory requirement, introduces CLI friction for local developers who just want to run `deployproof check`. |
+| **4. Diff against working tree (uncommitted changes)** | `git diff HEAD` + untracked | Directly matches mid-session edits before committing. | If the developer commits their files *before* running `deployproof check`, working-tree diff produces 0 files. |
 
 ---
 
 ### The Chosen Strategy: Smart Session Cascade with `--base` Override
 
-To deliver a zero-friction experience for solo developers while supporting CI workflows, DeployProof adopts a **3-Tier Smart Session Cascade**:
+To deliver a zero-friction experience for developers while supporting CI workflows, DeployProof adopts a **3-Tier Smart Session Cascade**:
 
 ```
                               deployproof check
@@ -187,3 +187,32 @@ Testing DeployProof against diverse, large-scale production codebases revealed 5
   - **Diff-Scoped Checks (1–3 files, < 20 mutants)**: Defaults to sequential in-place mutation. Spawning isolated sandboxes and copying the repository tree introduces 1–2s of snapshot overhead, whereas in-place sequential execution finishes in **2–5s total**.
   - **Large Diffs (100+ mutants) & Full-Repo Audits**: Users supply `--workers N` (or default to auto-detected CPU cores capped at 8) for near-linear multi-core acceleration.
   - **Disk Space & I/O Consideration**: Running $N$ workers creates $N$ copies of the repository in `tempfile.gettempdir()` ($N \times \text{repo size}$). On disk-constrained systems, worker count should be capped (e.g. `--workers 2` or `--workers 4`).
+
+### 10. In-Memory AST Mutation Schemata & Zero Disk I/O (`mutator.py`)
+- **Motivation**: Writing modified files to disk on Windows NTFS for hundreds of mutants created filesystem I/O bottlenecks and process start delays.
+- **Architectural Decision**:
+  - Implemented in-memory AST schemata compilation where all mutants for a file are injected into a single AST with conditional gates: `if os.environ.get("__DEPLOYPROOF_MUTANT__") == "42":`.
+  - Mutants switch dynamically in warm Python memory, eliminating file thrashing and disk locking completely.
+
+### 11. Actionable Self-Healing Test Synthesizer (`synthesizer.py`)
+- **Motivation**: Developers diagnosing surviving mutants often struggle to write precise boundary or fallback assertions from scratch.
+- **Architectural Decision**:
+  - Built an AST-driven test synthesizer that inspects function signatures, parameter type annotations, and AST mutation diffs.
+  - Generates targeted `pytest` unit tests with automated class instantiation (`obj = ClassName()`), async/await handling (`@pytest.mark.asyncio`), dictionary missing-key fallbacks, and asymmetric string token verification.
+
+### 12. Standard `pyproject.toml` Configuration Engine (`cli.py`)
+- **Motivation**: Eliminating config file sprawl by consolidating configuration into standard PEP 518 `pyproject.toml` files.
+- **Architectural Decision**:
+  - Added native `[tool.deployproof]` parsing via `tomllib` with transparent 4-tier precedence: CLI flags > `.deployproof.json` > `pyproject.toml` `[tool.deployproof]` > defaults.
+
+### 13. Interactive Quick-Fix Mode with Non-TTY Safety (`interactive.py`, `cli.py`)
+- **Motivation**: Enabling developers to inspect and apply self-healing tests directly inside their terminal without manual copy-pasting.
+- **Architectural Decision**:
+  - Built interactive terminal review prompts (`deployproof check -i`) supporting `[Y/n/q/all]` choices.
+  - Implemented `sys.stdin.isatty()` safety verification so unattended CI/CD runs never block or hang waiting for human input.
+
+### 14. GitHub Actions Native Workflow & Step Summary Integration (`ci.py`)
+- **Motivation**: Providing teams adopting DeployProof in CI with rich PR dashboards and visual annotations without third-party plugins.
+- **Architectural Decision**:
+  - Emits GitHub workflow commands (`::error file=...,line=...::` and `::warning file=...,line=...::`) directly into CI stdout.
+  - Appends formatted verification summary dashboard tables to `$GITHUB_STEP_SUMMARY`.

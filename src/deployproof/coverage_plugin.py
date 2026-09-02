@@ -6,9 +6,14 @@ allowing DeployProof to map each source line to the exact test cases covering it
 try:
     import coverage
 
-    def pytest_runtest_protocol(item, nextitem):
+    def pytest_runtest_setup(item):
         cov = coverage.Coverage.current()
         if cov is not None:
             cov.switch_context(item.nodeid)
+
+    def pytest_runtest_teardown(item, nextitem):
+        cov = coverage.Coverage.current()
+        if cov is not None:
+            cov.switch_context("")
 except ImportError:
     pass

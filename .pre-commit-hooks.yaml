@@ -1,0 +1,35 @@
+- id: deployproof
+  name: DeployProof Verification Gate
+  description: Deterministic quality & security gate for Python codebases that catches what coverage misses.
+  entry: deployproof check
+  language: python
+  types: [python]
+  require_serial: true
+  stages: [pre-commit, pre-push, manual]
+
+- id: deployproof-check
+  name: DeployProof Check (Alias)
+  description: Deterministic quality & security gate for Python codebases that catches what coverage misses.
+  entry: deployproof check
+  language: python
+  types: [python]
+  require_serial: true
+  stages: [pre-commit, pre-push, manual]
+
+- id: deployproof-full
+  name: DeployProof Full Repo Scan
+  description: Full-repository deterministic quality and security verification gate.
+  entry: deployproof check --full-repo
+  language: python
+  types: [python]
+  require_serial: true
+  stages: [pre-push, manual]
+
+- id: deployproof-fast
+  name: DeployProof Fast Pre-Check
+  description: Ultra-fast scoped pre-check on modified files only.
+  entry: deployproof check
+  language: python
+  types: [python]
+  require_serial: true
+  stages: [pre-commit, manual]

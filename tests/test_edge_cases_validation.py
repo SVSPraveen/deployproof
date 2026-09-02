@@ -107,11 +107,12 @@ def test_edge_case_fixtures_and_skipped_constructs():
     assert len(results) == 7
     # Semantic risk constructs are recorded as skipped
     assert results["Walrus Operator"]["skipped_count"] >= 1
-    assert results["Async/Await"]["skipped_count"] >= 1
     assert results["Match Statements"]["skipped_count"] >= 1
     assert results["Generators (Yield)"]["skipped_count"] >= 1
 
-    # Routine constructs (decorators and comprehensions) are NOT skipped; they are mutated directly
+    # Routine & upgraded constructs (decorators, comprehensions, async/await) are NOT skipped; they are mutated directly
+    assert results["Async/Await"]["mutants_count"] >= 1
+    assert results["Async/Await"]["skipped_count"] == 0
     assert results["Comprehensions"]["mutants_count"] >= 10
     assert results["Comprehensions"]["skipped_count"] == 0
     assert results["Decorators"]["skipped_count"] == 0
