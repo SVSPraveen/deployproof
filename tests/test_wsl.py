@@ -7,6 +7,7 @@ from unittest.mock import patch
 from deployproof.cli import main
 from deployproof.wsl import (
     DEFAULT_WSL_VENV,
+    _format_bash_path,
     check_wsl_readiness,
     get_wsl_path,
     is_windows,
@@ -124,7 +125,7 @@ def test_is_wsl_venv_configured_branches():
         mock_run.return_value.returncode = 0
         assert is_wsl_venv_configured("~/.my-venv") is True
         mock_run.assert_called_once_with(
-            ["wsl", "bash", "-c", "test -f '~/.my-venv/bin/mutmut'"],
+            ["wsl", "bash", "-c", 'test -f "$HOME/.my-venv/bin/mutmut"'],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -223,7 +224,7 @@ def test_run_wsl_mutmut_success_and_failures(tmp_path: Path):
         assert res["stdout"] == "mutmut complete: 10 killed"
         assert res["returncode"] == 0
         mock_run.assert_called_once_with(
-            ["wsl", "bash", "-c", "source '~/.custom-venv/bin/activate' && cd /mnt/c/myrepo && mutmut run"],
+            ["wsl", "bash", "-c", 'source "$HOME/.custom-venv/bin/activate" && cd /mnt/c/myrepo && mutmut run'],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -306,5 +307,23 @@ def test_wsl_paths_with_spaces(tmp_path: Path):
             timeout=120.0,
             check=False,
         )
+
+
+def test_format_bash_path():
+    """Verify _format_bash_path expansion of ~ to $HOME and proper quoting."""
+    assert _format_bash_path("~") == '"$HOME"'
+    assert _format_bash_path("~/") == '"$HOME"'
+    assert _format_bash_path("~//") == '"$HOME"'
+    assert _format_bash_path("~//foo") == '"$HOME/foo"'
+    assert _format_bash_path("~/path") == '"$HOME/path"'
+    assert _format_bash_path("~folder/sub") == '"$HOME/folder/sub"'
+    assert _format_bash_path("~/nested/dir/app.py") == '"$HOME/nested/dir/app.py"'
+    assert _format_bash_path("~/.deployproof-wsl-venv/bin/mutmut") == '"$HOME/.deployproof-wsl-venv/bin/mutmut"'
+    assert _format_bash_path("/normal/path") == "/normal/path"
+    assert _format_bash_path("/path with spaces/file.py") == "'/path with spaces/file.py'"
+
+
+
+
 
 

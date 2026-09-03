@@ -55,12 +55,20 @@ def get_wsl_path(path: Path) -> Optional[str]:
     return None
 
 
+def _format_bash_path(path_str: str) -> str:
+    """Format path for bash execution, expanding leading ~ with $HOME and escaping characters."""
+    if path_str.startswith("~"):
+        rel = path_str[1:].lstrip("/")
+        return f'"$HOME/{rel}"' if rel else '"$HOME"'
+    return shlex.quote(path_str)
+
+
 def is_wsl_venv_configured(venv_path: str = DEFAULT_WSL_VENV) -> bool:
     """Check if Linux venv with mutmut exists inside WSL."""
     if not is_windows():
         return False
     try:
-        quoted_target = shlex.quote(f"{venv_path}/bin/mutmut")
+        quoted_target = _format_bash_path(f"{venv_path}/bin/mutmut")
         res = subprocess.run(
             ["wsl", "bash", "-c", f"test -f {quoted_target}"],
             capture_output=True,
@@ -124,8 +132,8 @@ def run_wsl_mutmut(
         except ValueError:
             pass
 
-    quoted_act = shlex.quote(f"{venv_path}/bin/activate")
-    quoted_dir = shlex.quote(wsl_root)
+    quoted_act = _format_bash_path(f"{venv_path}/bin/activate")
+    quoted_dir = _format_bash_path(wsl_root)
     cmd_script = f"source {quoted_act} && cd {quoted_dir} && mutmut run"
     try:
         res = subprocess.run(

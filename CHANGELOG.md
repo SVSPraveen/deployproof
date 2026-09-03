@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.17] - 2026-09-03
 
 ### Added
-- **Comprehensive WSL Test Suite**: Added 100% branch and edge-case unit tests for `wsl.py`, boosting `wsl.py` mutation score to 96.8% and expanding total test count to **277 tests** (100% passing).
+- **Comprehensive WSL Test Suite**: Added 100% branch and edge-case unit tests for `wsl.py`, boosting `wsl.py` mutation score to 96.8% and expanding total test count to **278 tests** (100% passing).
 - **Embedded Architecture Hero Asset**: Added visual hero diagram to the top of `README.md`.
 - **Restored Reverse Dependency Investigation**: Restored `INVESTIGATION_blastradius.md` to repository tracking, linking with `FUTURE_SCOPE.md`.
 
