@@ -261,3 +261,34 @@ def test_live_progress_output_in_diff_scoped(tmp_path: Path, capsys, monkeypatch
     assert "elapsed:" in captured.out
 
 
+def test_auto_save_report_file(tmp_path: Path, capsys, monkeypatch):
+    """Verify that full verification reports are automatically saved to .deployproof/report.txt."""
+    monkeypatch.chdir(tmp_path)
+    import subprocess
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.email", "test@deployproof.dev"], cwd=tmp_path, capture_output=True, check=True)
+    subprocess.run(["git", "config", "user.name", "DeployProof Test"], cwd=tmp_path, capture_output=True, check=True)
+
+    src = tmp_path / "app.py"
+    src.write_text("def ping() -> str:\n    return 'pong'\n", encoding="utf-8")
+    test = tmp_path / "test_app.py"
+    test.write_text("from app import ping\ndef test_ping():\n    assert ping() == 'pong'\n", encoding="utf-8")
+
+    # 1. Default auto-save to .deployproof/report.txt
+    exit_code = main(["check", "--files", str(src)])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Full report saved to:" in captured.out
+    default_report = tmp_path / ".deployproof" / "report.txt"
+    assert default_report.exists()
+    assert "DeployProof - LOCAL PRE-CHECK" in default_report.read_text(encoding="utf-8")
+
+    # 2. Custom -o / --output path
+    custom_out = tmp_path / "custom_dir" / "my_scan.txt"
+    exit_code_custom = main(["check", "--files", str(src), "-o", str(custom_out)])
+    assert exit_code_custom == 0
+    assert custom_out.exists()
+    assert "DeployProof - LOCAL PRE-CHECK" in custom_out.read_text(encoding="utf-8")
+
+
+

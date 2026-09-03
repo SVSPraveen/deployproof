@@ -400,6 +400,7 @@ def format_report(
     strict_error_handling: bool = False,
     repo_root: Optional[Path] = None,
     threshold: float = 80.0,
+    suggest_tests: bool = False,
 ) -> str:
     """Format mutation testing results, security scans, SAST, CVEs, and dependency checks as terminal output."""
     lines: List[str] = []
@@ -679,14 +680,15 @@ def format_report(
                 lines.append(f"    Code: {pe.original_line}")
 
     if result.survived_mutants:
-        from deployproof.synthesizer import synthesize_tests_for_surviving_mutants
+        lines.append(f"\nSurviving Mutants ({len(result.survived_mutants)} unverified change{('s' if len(result.survived_mutants) != 1 else '')}):")
         synthesized_map: Dict[str, str] = {}
         line_fallback_map: Dict[Tuple[str, int], str] = {}
-        for st in synthesize_tests_for_surviving_mutants(result.survived_mutants, repo_root=root):
-            synthesized_map[st.mutant_id] = st.test_code
-            line_fallback_map[(str(st.file_path), st.line_number)] = st.test_code
+        if suggest_tests:
+            from deployproof.synthesizer import synthesize_tests_for_surviving_mutants
+            for st in synthesize_tests_for_surviving_mutants(result.survived_mutants, repo_root=root):
+                synthesized_map[st.mutant_id] = st.test_code
+                line_fallback_map[(str(st.file_path), st.line_number)] = st.test_code
 
-        lines.append(f"\nSurviving Mutants ({len(result.survived_mutants)} unverified change{('s' if len(result.survived_mutants) != 1 else '')}):")
         for i, m in enumerate(result.survived_mutants, 1):
             try:
                 rel_f = m.file_path.relative_to(root)
@@ -698,10 +700,14 @@ def format_report(
                 lines.append(f"      Original: {m.original_line}")
             if m.mutated_line:
                 lines.append(f"      Mutated:  {m.mutated_line}")
-            suggested_code = synthesized_map.get(m.mutant_id) or line_fallback_map.get((str(m.file_path), m.line_number))
-            if suggested_code:
-                indented_code = "\n".join("        " + l for l in suggested_code.splitlines())
-                lines.append(f"      Suggested Pytest Test to Kill Mutant:\n{indented_code}")
+            if suggest_tests:
+                suggested_code = synthesized_map.get(m.mutant_id) or line_fallback_map.get((str(m.file_path), m.line_number))
+                if suggested_code:
+                    indented_code = "\n".join("        " + l for l in suggested_code.splitlines())
+                    lines.append(f"      Suggested Pytest Test to Kill Mutant:\n{indented_code}")
+
+        if not suggest_tests:
+            lines.append("\n  [Tip] Run with '--heal-tests' (or '-i' / '--interactive') to automatically synthesize ready-to-run pytest unit tests to kill surviving mutants.")
     else:
         lines.append("\nSurviving Mutants: None (All generated mutants caught by test suite)")
 

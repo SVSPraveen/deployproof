@@ -2,10 +2,10 @@
 
 > Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis. Built for human engineering teams and AI-assisted workflows alike.
 
-[![PyPI version](https://img.shields.io/badge/pypi-v1.1.15-007ec6.svg)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/badge/pypi-v1.1.16-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-265%20passed-2ea44f.svg)](https://github.com/SVSPraveen/deployproof)
+[![Tests](https://img.shields.io/badge/tests-266%20passed-2ea44f.svg)](https://github.com/SVSPraveen/deployproof)
 [![Stress Tests](https://img.shields.io/badge/stress%20tests-14%2F14%20passed-2ea44f.svg)](stress_fixtures/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-DeployProof%20Portal-6366f1.svg)](https://svspraveen.github.io/deployproof/)
@@ -298,7 +298,7 @@ DeployProof provides a rich command-line interface with fine-grained control ove
 | **Check (Default Gate)** | `deployproof check [options]` | Runs all 7 deterministic pre-push verification gates on the modified files in the current git working tree session. | Evaluates git working tree diff against `HEAD` |
 | **Initialize Pre-Push Hook** | `deployproof init` | Automatically installs the DeployProof pre-push hook into `.git/hooks/pre-push` and generates an initial `pyproject.toml` `[tool.deployproof]` configuration block. | Installs executable shell/powershell hook |
 | **Inspect Diff Scope** | `deployproof diff` | Prints the detected git diff status, modified source files, and test files currently in scope without running tests. | Shows current diff session files |
-| **Version** | `deployproof --version` | Displays the current installed version of DeployProof. | Displays `deployproof 1.1.15` |
+| **Version** | `deployproof --version` | Displays the current installed version of DeployProof. | Displays `deployproof 1.1.16` |
 | **Help** | `deployproof --help` | Displays full interactive command usage and flag descriptions. | Prints CLI help manual |
 
 #### Mutation Testing & Self-Healing Options
@@ -331,6 +331,8 @@ DeployProof provides a rich command-line interface with fine-grained control ove
 
 | Flag | Short | Description | Default |
 |---|---|---|---|
+| `--output <path>` | `-o` | Custom file path to save the full verification report (e.g. `-o scan.txt`). Automatically defaults to `.deployproof/report.txt`. | `.deployproof/report.txt` |
+| `--suggest-tests` | | Print auto-synthesized test suggestions inline for surviving mutants in terminal report. | Disabled by default |
 | `--json` | | Output structured machine-readable JSON containing all findings across all 7 verification gates. Ideal for custom CI pipelines, IDE extensions, and dashboards. | Human-readable terminal output |
 | `--github-actions` | `--ci` | Emit inline GitHub Actions annotations (`::error file=...,line=...::`, `::warning::`) on PR diff lines and write a complete Markdown dashboard to `$GITHUB_STEP_SUMMARY`. | Auto-detected when `GITHUB_ACTIONS=true` |
 | `--config <path>` | | Explicit path to a `pyproject.toml` or custom configuration file. | Auto-discovers `pyproject.toml` in repo root |
@@ -347,7 +349,7 @@ deployproof check --json
 
 ```json
 {
-  "version": "1.1.15",
+  "version": "1.1.16",
   "status": "passed",
   "summary": {
     "target_files_count": 1,
@@ -472,14 +474,14 @@ jobs:
 ```yaml
 repos:
   - repo: https://github.com/SVSPraveen/deployproof
-    rev: v1.1.15
+    rev: v1.1.16
     hooks:
       - id: deployproof-check
 ```
 
 ## Status & Roadmap
 
-- **Current (v1.1.15):** In-Memory AST Schemata Mutation Testing, Actionable Self-Healing Test Synthesizer (`--heal-tests`), Interactive Quick-Fix Mode (`-i`), `pyproject.toml` `[tool.deployproof]` configuration engine, GitHub Actions native inline annotations and `$GITHUB_STEP_SUMMARY` dashboard, `.pre-commit-hooks.yaml` support, Full Repository Audit Mode (`--full-repo`) with isolated multi-worker sandboxes, AST OWASP Top 10 SAST scanner, 50-commit git history secrets scanner, OSV CVE database verification, GhostApproval symlink sandbox escape detector, **265 unit tests**, and complete `/docs` product portal.
+- **Current (v1.1.16):** In-Memory AST Schemata Mutation Testing, Automatic Persistent Audit Logs (`.deployproof/report.txt`), Actionable Self-Healing Test Synthesizer (`--heal-tests`), Interactive Quick-Fix Mode (`-i`), `pyproject.toml` `[tool.deployproof]` configuration engine, GitHub Actions native inline annotations and `$GITHUB_STEP_SUMMARY` dashboard, `.pre-commit-hooks.yaml` support, Full Repository Audit Mode (`--full-repo`) with isolated multi-worker sandboxes, AST OWASP Top 10 SAST scanner, 50-commit git history secrets scanner, OSV CVE database verification, GhostApproval symlink sandbox escape detector, **266 unit tests**, and complete `/docs` product portal.
 - **Next:** Reverse test-to-source dependency mapping (see `FUTURE_SCOPE.md`), SARIF 2.1.0 report exporter, and multi-language mutation rule packs.
 
 ## Contributing

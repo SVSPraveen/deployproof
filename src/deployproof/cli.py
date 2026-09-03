@@ -206,6 +206,20 @@ def create_parser() -> argparse.ArgumentParser:
         help="Prompt interactively to apply auto-synthesized test cases to kill surviving mutants.",
     )
     check_parser.add_argument(
+        "--suggest-tests",
+        action="store_true",
+        default=False,
+        help="Print auto-synthesized test suggestions inline for surviving mutants in terminal report.",
+    )
+    check_parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Custom file path to save the full verification report (default: .deployproof/report.txt).",
+    )
+    check_parser.add_argument(
         "--github-actions",
         "--ci",
         action="store_true",
@@ -490,7 +504,32 @@ def handle_check(args: argparse.Namespace) -> int:
             strict_error_handling=strict_error_handling,
             repo_root=repo_root or cwd,
             threshold=threshold,
+            suggest_tests=getattr(args, "suggest_tests", False),
         )
+
+    # Automatically save full report to persistent artifact file (.deployproof/report.txt or custom --output)
+    try:
+        custom_output = getattr(args, "output", None)
+        if custom_output:
+            report_path = (repo_root or cwd) / Path(custom_output)
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            report_dir = (repo_root or cwd) / ".deployproof"
+            report_dir.mkdir(parents=True, exist_ok=True)
+            report_filename = "report.json" if getattr(args, "json", False) else "report.txt"
+            report_path = report_dir / report_filename
+
+        report_path.write_text(report_text, encoding="utf-8")
+        try:
+            rel_report_path = report_path.relative_to(repo_root or cwd)
+        except ValueError:
+            rel_report_path = report_path
+
+        if not getattr(args, "json", False):
+            report_text += f"\n[+] Full report saved to: {rel_report_path}\n"
+    except Exception:
+        pass
+
     print(report_text)
 
     generate_tests_path = getattr(args, "generate_tests", None)

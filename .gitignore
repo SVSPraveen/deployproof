@@ -45,6 +45,7 @@ scratch/
 
 # Testing and coverage
 .pytest_cache/
+.deployproof/
 .coverage
 .coverage.*
 htmlcov/

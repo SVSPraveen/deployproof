@@ -164,9 +164,14 @@ def test_reporter_renders_synthesized_tests(tmp_path: Path):
         files_tested=[sample],
     )
 
-    terminal_out = format_report(res, [sample], repo_root=tmp_path)
+    terminal_out = format_report(res, [sample], repo_root=tmp_path, suggest_tests=True)
     assert "Suggested Pytest Test to Kill Mutant:" in terminal_out
     assert "def test_kill_verify_access_line_2():" in terminal_out
+
+    # By default (suggest_tests=False), suggestions are not printed
+    default_out = format_report(res, [sample], repo_root=tmp_path, suggest_tests=False)
+    assert "Suggested Pytest Test to Kill Mutant:" not in default_out
+    assert "[Tip] Run with '--heal-tests'" in default_out
 
     json_str = format_json_report(res, [sample], repo_root=tmp_path)
     assert "synthesized_tests" in json_str
@@ -304,7 +309,7 @@ def test_multiple_mutants_same_line_all_get_suggested_tests(tmp_path: Path):
     # All 3 mutants should have synthesized tests without any being dropped
     assert len(tests) == 3
 
-    report = format_report(res, [sample], repo_root=tmp_path)
+    report = format_report(res, [sample], repo_root=tmp_path, suggest_tests=True)
     # Each of the 3 mutants in the surviving mutants section must have a suggested test
     count_suggestions = report.count("Suggested Pytest Test to Kill Mutant:")
     assert count_suggestions == 3

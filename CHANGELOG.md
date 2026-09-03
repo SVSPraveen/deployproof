@@ -5,6 +5,16 @@ All notable changes to DeployProof will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.16] - 2026-09-03
+
+### Added
+- **Automatic Persistent Audit Logs (`.deployproof/report.txt`)**: Every run (both diff-scoped `deployproof check` and `deployproof check --full-repo`) automatically records the complete, untruncated 7-gate verification report into `.deployproof/report.txt` (or `.deployproof/report.json` if using `--json`).
+- **Custom Report Output (`-o` / `--output <path>`)**: Allows directing the full verification report to any custom destination file path.
+- **Inline Test Suggestion Control (`--suggest-tests`)**: Gated inline test code generation behind `--suggest-tests` and `--heal-tests`, ensuring terminal outputs remain concise and readable while preserving full synthesized test suite export capabilities.
+
+### Fixed
+- **Terminal Buffer Overflow**: Fixed massive terminal dumps during multi-thousand mutant full-repo audits by removing unsolicited test synthesis code from default console reports.
+
 ## [1.1.15] - 2026-09-03
 
 ### Fixed
