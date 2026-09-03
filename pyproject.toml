@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "deployproof"
 version = "1.1.17"
-description = "Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis."
+description = "DeployProof (Python CLI) — AI-code verification, in-memory AST mutation testing, secrets scanning & self-healing test synthesis for Python by SVS Praveen."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -17,6 +17,8 @@ keywords = [
     "pre-push-gate",
     "self-healing-tests",
     "ast-mutation-testing",
+    "ai-code-verification",
+    "python-cli",
     "code-quality",
     "developer-tools",
     "pytest-plugin",

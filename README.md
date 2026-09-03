@@ -1,6 +1,6 @@
 # DeployProof
 
-**Python CLI** — pre-push AI-code verification, AST mutation testing & self-healing test synthesis. Verifies your code locally in **2–5 seconds** before commit or CI.
+**DeployProof** is a **Python CLI** tool for **AI-code verification** — it catches what 100% line coverage misses, scanning for unsafe mutations, leaked secrets, and hallucinated dependencies **before** your code reaches CI. Created by [SVS Praveen](https://github.com/SVSPraveen).
 
 ```bash
 pip install deployproof
@@ -310,4 +310,4 @@ MIT. See [LICENSE](LICENSE).
 
 ---
 
-*Created & Architected by [SVS Praveen](https://github.com/SVSPraveen) · [Portfolio](https://svspraveen.vercel.app/) · [LinkedIn](https://www.linkedin.com/in/svs-praveen-s/)*
+*DeployProof is created & architected by [SVS Praveen](https://github.com/SVSPraveen) — Python developer focused on AI-code verification tooling · [Portfolio](https://svspraveen.vercel.app/) · [LinkedIn](https://www.linkedin.com/in/svs-praveen-s/)*
