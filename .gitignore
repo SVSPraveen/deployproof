@@ -91,3 +91,5 @@ MAINTENANCE.md
 DeployProof-scope.md
 GROWTH_SCOPE.md
 scripts/
+mutants/
+full_scan_report.txt
