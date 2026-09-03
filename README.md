@@ -15,7 +15,7 @@ pip install deployproof
 [![Docs](https://img.shields.io/badge/docs-DeployProof%20Portal-6366f1.svg)](https://svspraveen.github.io/deployproof/)
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/SVSPraveen/deployproof/main/assets/deployproof-hero.png" alt="DeployProof: Pre-Push Quality & Security Gate" width="100%">
+  <img src="https://raw.githubusercontent.com/SVSPraveen/deployproof/main/assets/demo.gif" alt="DeployProof: In-Memory AST Mutation & Pre-Push Verification Walkthrough" width="100%">
 </p>
 
 ---
@@ -81,10 +81,6 @@ pipx install deployproof
 ---
 
 ## Quickstart & Walkthrough
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/SVSPraveen/deployproof/main/assets/demo.gif" alt="DeployProof Terminal Verification Walkthrough" width="100%">
-</p>
 
 ### The Problem in Action
 
