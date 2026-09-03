@@ -2,8 +2,7 @@
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-import pytest
+from unittest.mock import patch
 
 from deployproof.cli import main
 from deployproof.wsl import (
