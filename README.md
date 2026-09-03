@@ -1,7 +1,10 @@
-# DeployProof &nbsp;·&nbsp; `pip install deployproof`
+# DeployProof
 
 **Python CLI** — pre-push AI-code verification, AST mutation testing & self-healing test synthesis. Verifies your code locally in **2–5 seconds** before commit or CI.
 
+```bash
+pip install deployproof
+```
 
 [![PyPI version](https://img.shields.io/badge/pypi-v1.1.17-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
