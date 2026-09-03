@@ -2860,7 +2860,6 @@ def run_mutation_tests_parallel(
                 shutil.copy2(plugin_src, snapshot_dir / "src" / "deployproof" / "coverage_plugin.py")
 
         # 5. Baseline runs for unique test suites with dynamic coverage context recording
-        suite_baseline_cache: Dict[Tuple[str, ...], Tuple[bool, int, float, bool, Optional[str]]] = {}
         file_baseline_info: Dict[Path, Tuple[int, float]] = {}
         env_snapshot = os.environ.copy()
         env_snapshot["PYTHONDONTWRITEBYTECODE"] = "1"
