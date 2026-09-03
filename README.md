@@ -15,7 +15,7 @@ pip install deployproof
 [![Docs](https://img.shields.io/badge/docs-DeployProof%20Portal-6366f1.svg)](https://svspraveen.github.io/deployproof/)
 
 <p align="center">
-  <img src="assets/deployproof-hero.png" alt="DeployProof: Deterministic Pre-Push Quality & Security Gate" width="100%">
+  <img src="https://raw.githubusercontent.com/SVSPraveen/deployproof/main/assets/deployproof-hero.png" alt="DeployProof: Pre-Push Quality & Security Gate" width="100%">
 </p>
 
 ---
@@ -50,7 +50,7 @@ Modern software development — whether written by human engineering teams or ge
 * **Silently Swallowed Exceptions**: Blanket `except Exception: pass` anti-patterns that hide critical runtime bugs.
 * **Dependency Hallucinations & Slopsquatting**: Package names invented by LLMs or mistyped dependencies that don't exist on public PyPI.
 
-DeployProof serves as an uncompromising, deterministic pre-push gate that validates code quality, test integrity, and security locally before any commit reaches CI or production.
+DeployProof is a local pre-push gate that validates code quality, test integrity, and security before any commit reaches CI or production.
 
 > **Privacy & Security Guarantee**: DeployProof runs 100% locally on your machine with zero external telemetry. The only outbound network requests are read-only queries to (1) the official PyPI registry (`https://pypi.org/pypi/<pkg>/json`) to verify that newly introduced dependencies exist, and (2) the open OSV database (`https://api.osv.dev/v1/query`) when CVE scanning is active (can be disabled with `--no-check-cve`). DeployProof sends no source code, telemetry, test results, or secret findings to any external server.
 
