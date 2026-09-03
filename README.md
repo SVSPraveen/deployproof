@@ -1,6 +1,6 @@
 # DeployProof
 
-**DeployProof** is a **Python CLI** tool for **AI-code verification** — it catches what 100% line coverage misses, scanning for unsafe mutations, leaked secrets, and hallucinated dependencies **before** your code reaches CI. Created by [SVS Praveen](https://github.com/SVSPraveen).
+**DeployProof** is a **Python CLI** tool for **AI-code verification** — it catches what 100% line coverage misses by running **in-memory AST mutation testing** on your git diff before any commit reaches CI. Created by [SVS Praveen](https://github.com/SVSPraveen).
 
 ```bash
 pip install deployproof
@@ -30,10 +30,8 @@ pip install deployproof
 - [How It Compares: DeployProof vs. Mutmut vs. Cosmic Ray](#how-it-compares)
 - [Installation](#installation)
 - [Quickstart & Walkthrough](#quickstart--walkthrough)
-- [How It Works (Diff-Scoped, Full Repo, & WSL)](#how-it-works)
-- [The 7 Verification Gates](#the-7-verification-gates)
-- [Windows WSL Delegation](#3-windows-wsl-delegation-deployproof-check---wsl--native-linux-speed-on-windows)
-- [Architecture & Design Rationale (`DECISIONS.md`)](#architecture--design-rationale)
+- [How It Works](#how-it-works)
+- [The Verification Gates](#the-verification-gates)
 - [CI/CD & Pre-Commit Integration](#cicd--pre-commit-integration)
 - [Configuration (`pyproject.toml`)](#configuration-pyprojecttoml)
 - [Full Documentation & CLI Reference](#full-documentation--cli-reference)
@@ -42,40 +40,30 @@ pip install deployproof
 
 ## Why This Exists
 
-Modern software development — whether written by human engineering teams or generated through AI coding assistants — introduces subtle failure modes that standard linters and line-coverage metrics completely miss:
+The standard AI-code workflow produces tests that pass CI but don't actually verify anything. A test suite at 90% line coverage can have a mutation score near zero — meaning almost any change to the logic under test goes completely undetected.
 
-* **Deceptive Test Suites**: Test suites boasting 90%+ line coverage that never assert true correctness, masking near-zero mutation scores.
-* **Accidental Credential Exposure**: Hardcoded API keys, bearer tokens, or service credentials generated in passing or pasted into tests.
-* **Sandbox Escape Risks**: Symlinks that deceive tool approval prompts into breaking outside the repository sandbox.
-* **Silently Swallowed Exceptions**: Blanket `except Exception: pass` anti-patterns that hide critical runtime bugs.
-* **Dependency Hallucinations & Slopsquatting**: Package names invented by LLMs or mistyped dependencies that don't exist on public PyPI.
+DeployProof runs **in-memory AST mutation testing** scoped to your git diff. It mutates operators, constants, and control-flow in warm RAM (no disk writes), runs your tests against each mutant, and fails the push if surviving mutants exceed your threshold — in the time it takes to read a Slack message.
 
-DeployProof is a local pre-push gate that validates code quality, test integrity, and security before any commit reaches CI or production.
+It also ships with a set of companion security gates for the failure modes that mutation testing doesn't catch on its own: hardcoded secrets, OWASP-class SAST patterns, hallucinated dependencies, and symlink escapes.
 
-> **Privacy & Security Guarantee**: DeployProof runs 100% locally on your machine with zero external telemetry. The only outbound network requests are read-only queries to (1) the official PyPI registry (`https://pypi.org/pypi/<pkg>/json`) to verify that newly introduced dependencies exist, and (2) the open OSV database (`https://api.osv.dev/v1/query`) when CVE scanning is active (can be disabled with `--no-check-cve`). DeployProof sends no source code, telemetry, test results, or secret findings to any external server.
+> **Privacy guarantee**: DeployProof runs 100% locally. The only outbound requests are read-only: PyPI JSON API (dependency hallucination check) and OSV (CVE lookup, opt-out with `--no-check-cve`). No source code, test results, or findings leave your machine.
 
 ---
 
 ## How It Compares
 
-Traditional mutation testing tools re-run full test suites against disk-modified files for hours. DeployProof was built from the ground up for instantaneous pre-commit loops using **in-memory AST mutation schemata**, **process sandboxing**, and **unified security scanning**:
+The core difference from mutmut and Cosmic Ray is *where* the mutation happens. Both of those tools rewrite source files on disk and spawn a fresh test process for every mutant — which is slow and doesn't scope to your diff. DeployProof compiles all mutants into a single conditional AST in warm RAM and only tests the files you actually changed:
 
-| Feature / Capability | DeployProof | mutmut | Cosmic Ray |
+| | DeployProof | mutmut | Cosmic Ray |
 |---|:---:|:---:|:---:|
-| **Git Diff Speed (Pre-Commit)** | **Significantly faster** *(Diff-Scoped, in-memory, fail-fast)* | Slow (rewrites files, full sweeps) | Slow (rewrites files, full sweeps) |
-| **Mutation Engine** | **In-Memory AST Schemata** | File rewrite to disk | AST disk rewriting |
-| **Self-Healing Test Synthesis** | **Yes (`--heal-tests` / `-i`)** | No | No |
-| **Async / Await Dropping** | **Yes** | No | No |
-| **Argument Swapping & Dict Fallbacks** | **Yes** | No | No |
-| **Context Manager Bypass (`with` / `async with`)** | **Yes** | No | No |
-| **Credential & Git History Leaks (50 commits)** | **Yes (Shannon Entropy)** | No | No |
-| **AST OWASP Top 10 SAST Scanner** | **Yes (Zero-dependency)** | No | No |
-| **Dependency Hallucination Defense (PyPI)** | **Yes** | No | No |
-| **CVE Vulnerability Defense (OSV)** | **Yes** | No | No |
-| **Symlink Sandbox Escape Defense (CWE-61)** | **Yes** | No | No |
-| **Isolated Multi-Worker Sandboxes** | **Yes (`--workers N`)** | No | Distributed (Celery) |
-| **Automated Persistent Audit Logs** | **Yes (`.deployproof/report.txt`)** | No | SQLite DB |
-| **Native GitHub Actions Step Summaries** | **Yes (`--github-actions`)** | No | No |
+| **Mutation engine** | In-memory AST schemata | File rewrite to disk | AST disk rewriting |
+| **Scoped to git diff** | **Yes** | No (full repo) | No (full repo) |
+| **Self-healing test synthesis** | **Yes** | No | No |
+| **Async/await, arg-swap, boundary mutations** | **Yes** | Partial | Partial |
+| **Secrets & SAST scanning** | Also included | No | No |
+| **Dependency hallucination & CVE checks** | Also included | No | No |
+| **Multi-worker sandboxes** | **Yes (`--workers N`)** | No | Distributed (Celery) |
+| **GitHub Actions summaries** | **Yes** | No | No |
 
 ---
 
@@ -95,7 +83,7 @@ pipx install deployproof
 ## Quickstart & Walkthrough
 
 <p align="center">
-  <img src="assets/deployproof-terminal-showcase.jpg" alt="DeployProof Terminal Verification Showcase" width="100%">
+  <img src="https://raw.githubusercontent.com/SVSPraveen/deployproof/main/assets/deployproof-terminal-showcase.jpg" alt="DeployProof Terminal Verification Showcase" width="100%">
 </p>
 
 ### The Problem in Action
@@ -170,13 +158,13 @@ Pre-check clean: 100% of tested basic mutations caught.
 
 ## How It Works
 
-DeployProof provides two distinct, optimized execution modes:
+DeployProof runs in two modes:
 
-### 1. Diff-Scoped Pre-Push Gate (`deployproof check`) — *Default Fast Mode*
-Evaluates **only the files modified in your active session or git diff** (1–3 files typically). Because only newly edited AST nodes are mutated in warm RAM — no disk writes, no file copies — this mode is **significantly faster** than traditional mutation tools and completes well before your attention switches context.
+### Default: Diff-Scoped Gate (`deployproof check`)
+Evaluates **only the files modified in your git diff**. Because mutants are compiled into warm RAM — no disk writes, no file copies — this mode is significantly faster than traditional mutation tools and completes before your attention switches context.
 
 ```bash
-# Fast check: verifies modified files in your current git diff
+# Check modified files in your current git diff
 deployproof check
 
 # Output structured JSON for IDE tooling or custom pipelines
@@ -186,64 +174,69 @@ deployproof check --json
 deployproof check --strict-mocks --strict-error-handling
 ```
 
-### 2. Full Repository Audit Mode (`deployproof check --full-repo`) — *Thorough Audits*
-Evaluates **every tracked Python file across the entire repository**, parallelizing test execution across isolated worker sandboxes:
+### Full Repository Audit (`deployproof check --full-repo`)
+Evaluates **every tracked Python file** across the entire repository, parallelizing across isolated worker sandboxes:
 
 ```bash
-# Full repository audit distributed across isolated parallel worker sandboxes
 deployproof check --full-repo --workers 8
 ```
 
-### 3. Windows WSL Delegation (`deployproof check --wsl`) — *Native Linux Speed on Windows*
-On Windows, full mutation testing tools traditionally require POSIX process forking. DeployProof provides a seamless bridge via the `--wsl` flag that translates paths (safely quoting spaces), delegates mutation runs to `mutmut` inside a native Linux environment inside Windows Subsystem for Linux (WSL), and streams verified results back to your Windows console:
+### Windows WSL Delegation (`deployproof check --wsl`)
+Translates Windows paths (safely quoting spaces), delegates mutation runs to `mutmut` inside a native Linux environment in WSL, and streams results back to your Windows console:
 
 ```bash
-# Windows: delegate mutation test verification to native Linux mutmut in WSL
 deployproof check --wsl
 ```
 
-> ⚙️ **One-Time WSL Setup**: Configure mutmut in WSL by running:  
-> `wsl bash -c "python3 -m venv ~/.deployproof-wsl-venv && ~/.deployproof-wsl-venv/bin/pip install mutmut pytest"`  
-> *(If WSL or the Linux venv is not configured, DeployProof automatically falls back to the native in-memory engine with a helpful notice).*
-
-> 📊 **Hardware & Sizing Details**: For benchmark timing matrices across open-source codebases, per-worker RAM footprints, and hardware tuning formulas, see the **[Interactive Sizing & Architecture Guide](https://svspraveen.github.io/deployproof/)**.
+> ⚙️ **One-Time WSL Setup**: `wsl bash -c "python3 -m venv ~/.deployproof-wsl-venv && ~/.deployproof-wsl-venv/bin/pip install mutmut pytest"`  
+> *(If WSL is not configured, DeployProof falls back to the native in-memory engine with a notice.)*
 
 ---
 
-## The 7 Verification Gates
+## The Verification Gates
 
-Every DeployProof check executes seven deterministic quality and security gates:
+### Core: Mutation Testing
 
-1. **Gate 1: In-Memory Schemata Mutation Engine**  
-   Mutates AST operators (`>=`, `==`, `and`, `or`, `*`, numeric constants, string boundaries, async/await, argument swaps) and toggles mutants via warm RAM environment switches (`__DEPLOYPROOF_MUTANT__`), bypassing disk I/O.
-2. **Gate 2: Actionable Self-Healing Test Synthesizer**  
-   Analyzes surviving mutants and automatically synthesizes ready-to-run pytest unit tests with inferred parameter signatures, class method instantiation, and boundary value fixtures (`--heal-tests`, `-i`).
-3. **Gate 3: AST OWASP Top 10 SAST Scanner**  
-   Zero-dependency static security scanner detecting SQL injection, command execution (`shell=True`, `os.system`), insecure deserialization (`pickle`, `yaml.load`), path traversals, and disabled SSL verification.
-4. **Gate 4: Secrets & 50-Commit Git History Scanner**  
-   Scans session files and the past 50 git commits using Shannon entropy analysis to detect committed API keys (OpenAI, Anthropic, AWS, GitHub, Stripe) and private credentials.
-5. **Gate 5: Dependency CVE & Slopsquatting Defense**  
-   Cross-references requirements against the open OSV database for known CVEs and queries PyPI JSON API in real time to catch hallucinated package names.
-6. **Gate 6: CWE-61 Symlink Sandbox Escape Gate**  
-   Resolves symbolic links and blocks any whose target resolves outside the repository root (GhostApproval defense).
-7. **Gate 7: Control Flow & Error Handling Gate**  
-   Detects bare `except:`, swallowed exceptions (`except Exception: pass`), unreachable dead code, and mock leaks (`--strict-mocks`, `--strict-error-handling`).
+**Gate 1 — In-Memory AST Mutation Engine**  
+Mutates operators (`>=`, `==`, `and`, `or`, `*`), numeric constants, string boundaries, async/await drops, and argument swaps. All mutants are compiled into a single conditional AST and toggled via environment variable — no disk I/O, no file copies.
+
+**Gate 2 — Self-Healing Test Synthesizer**  
+Analyzes surviving mutants and synthesizes ready-to-run pytest unit tests with inferred parameter signatures, class method instantiation, and boundary value fixtures. Run with `--heal-tests` or `-i` for interactive mode.
+
+---
+
+### Also Included: Security Gates
+
+These run alongside the mutation pass and catch categories of failure that mutation testing alone doesn't cover:
+
+**Gate 3 — AST OWASP Top 10 SAST Scanner**  
+Zero-dependency static scanner: SQL injection, `shell=True`, `os.system`, insecure deserialization (`pickle`, `yaml.load`), path traversals, disabled SSL.
+
+**Gate 4 — Secrets & Git History Scanner**  
+Shannon entropy scan of session files and the past 50 git commits: OpenAI, Anthropic, AWS, GitHub, and Stripe keys.
+
+**Gate 5 — Dependency CVE & Slopsquatting Defense**  
+Cross-references requirements against OSV for known CVEs; queries PyPI JSON API in real time to catch hallucinated package names.
+
+**Gate 6 — CWE-61 Symlink Sandbox Escape**  
+Resolves symlinks and blocks any whose target falls outside the repository root.
+
+**Gate 7 — Control Flow & Error Handling**  
+Detects bare `except:`, swallowed exceptions, unreachable dead code, and mock leaks (`--strict-mocks`, `--strict-error-handling`).
 
 ---
 
 ## Architecture & Design Rationale
 
-Curious why DeployProof was architected with in-memory AST schemata instead of file rewrites, why it uses a dual-tier verification model, or how it mitigates LLM-generated code risks?
+Curious why in-memory AST schemata instead of file rewrites, or how the dual-tier model works?
 
-👉 **Read [DECISIONS.md](DECISIONS.md)** for our complete technical design document, performance trade-off analyses, AST mutation safety proofs, and threat models.
+👉 **Read [DECISIONS.md](DECISIONS.md)** for the complete technical design document, performance trade-off analyses, and threat models.
 
 ---
 
 ## CI/CD & Pre-Commit Integration
 
 ### GitHub Actions
-Add `.github/workflows/deployproof.yml` to emit PR inline annotations and visual Markdown dashboards to `$GITHUB_STEP_SUMMARY`:
-
 ```yaml
 name: DeployProof Gate
 on: [push, pull_request]
@@ -275,8 +268,6 @@ repos:
 
 ## Configuration (`pyproject.toml`)
 
-DeployProof natively supports standard PEP 518 `pyproject.toml` configuration under `[tool.deployproof]`:
-
 ```toml
 [tool.deployproof]
 threshold = 85.0
@@ -294,7 +285,7 @@ generate_tests = "tests/test_deployproof_healed.py"
 
 ## Full Documentation & CLI Reference
 
-For exhaustive CLI flag references, JSON output schemas, Windows WSL configurations, and advanced customization guides:
+For exhaustive CLI flag references, JSON output schemas, and advanced customization:
 
 👉 **[Explore the Interactive DeployProof Portal & Docs Site](https://svspraveen.github.io/deployproof/)**
 
