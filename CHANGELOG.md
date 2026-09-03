@@ -5,6 +5,11 @@ All notable changes to DeployProof will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.19] - 2026-09-03
+
+### Changed
+- **Top Hero Walkthrough Banner**: Replaced static header mockup with the dynamic, high-fidelity animated terminal walkthrough GIF (`assets/demo.gif`) as the primary hero asset on GitHub and PyPI.
+
 ## [1.1.18] - 2026-09-03
 
 ### Added
