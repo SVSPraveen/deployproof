@@ -5,10 +5,14 @@
 [![PyPI version](https://img.shields.io/badge/pypi-v1.1.16-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-266%20passed-2ea44f.svg)](https://github.com/SVSPraveen/deployproof)
+[![Tests](https://img.shields.io/badge/tests-273%20passed-2ea44f.svg)](https://github.com/SVSPraveen/deployproof)
 [![Stress Tests](https://img.shields.io/badge/stress%20tests-14%2F14%20passed-2ea44f.svg)](stress_fixtures/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-DeployProof%20Portal-6366f1.svg)](https://svspraveen.github.io/deployproof/)
+
+<p align="center">
+  <img src="assets/deployproof-hero.png" alt="DeployProof: Deterministic Pre-Push Quality & Security Gate" width="100%">
+</p>
 
 ---
 
@@ -26,7 +30,9 @@ Modern software development — whether crafted by human engineering teams or ge
 
 DeployProof serves as an uncompromising, deterministic pre-push gate that validates code quality, test integrity, and security locally before any commit reaches CI or production.
 
-> **Privacy & Security Guarantee**: DeployProof runs 100% locally on your machine. It makes zero outbound network calls, except for querying the official PyPI registry (JSON API) to verify that newly introduced dependencies exist and are not hallucinated. DeployProof sends no source code, telemetry, test results, or secret findings to any external server.
+> **Privacy & Security Guarantee**: DeployProof runs 100% locally on your machine with zero external telemetry. The only outbound network requests are read-only queries to (1) the official PyPI registry (`https://pypi.org/pypi/<pkg>/json`) to verify that newly introduced dependencies exist, and (2) the open OSV database (`https://api.osv.dev/v1/query`) when CVE scanning is active (can be disabled with `--no-check-cve`). DeployProof sends no source code, telemetry, test results, or secret findings to any external server.
+
+> 💡 **Self-Scanning Note**: When running `deployproof check` on DeployProof's own repository, DeployProof will flag synthetic dummy keys in `stress_fixtures/` and `tests/test_history_secrets.py`. These are intentional test fixtures designed to verify that the historical regex scanner catches leaks.
 
 ## Install
 
@@ -481,7 +487,7 @@ repos:
 
 ## Status & Roadmap
 
-- **Current (v1.1.16):** In-Memory AST Schemata Mutation Testing, Automatic Persistent Audit Logs (`.deployproof/report.txt`), Actionable Self-Healing Test Synthesizer (`--heal-tests`), Interactive Quick-Fix Mode (`-i`), `pyproject.toml` `[tool.deployproof]` configuration engine, GitHub Actions native inline annotations and `$GITHUB_STEP_SUMMARY` dashboard, `.pre-commit-hooks.yaml` support, Full Repository Audit Mode (`--full-repo`) with isolated multi-worker sandboxes, AST OWASP Top 10 SAST scanner, 50-commit git history secrets scanner, OSV CVE database verification, GhostApproval symlink sandbox escape detector, **266 unit tests**, and complete `/docs` product portal.
+- **Current (v1.1.16):** In-Memory AST Schemata Mutation Testing, Automatic Persistent Audit Logs (`.deployproof/report.txt`), Actionable Self-Healing Test Synthesizer (`--heal-tests`), Interactive Quick-Fix Mode (`-i`), `pyproject.toml` `[tool.deployproof]` configuration engine, GitHub Actions native inline annotations and `$GITHUB_STEP_SUMMARY` dashboard, `.pre-commit-hooks.yaml` support, Full Repository Audit Mode (`--full-repo`) with isolated multi-worker sandboxes, AST OWASP Top 10 SAST scanner, 50-commit git history secrets scanner, OSV CVE database verification, GhostApproval symlink sandbox escape detector, **273 unit tests**, and complete `/docs` product portal.
 - **Next:** Reverse test-to-source dependency mapping (see `FUTURE_SCOPE.md`), SARIF 2.1.0 report exporter, and multi-language mutation rule packs.
 
 ## Contributing

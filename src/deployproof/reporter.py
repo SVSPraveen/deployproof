@@ -1,7 +1,7 @@
 """Terminal output reporter for DeployProof."""
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from deployproof import __version__
 from deployproof.control_flow import ControlFlowScanSummary

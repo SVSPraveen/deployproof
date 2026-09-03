@@ -187,7 +187,7 @@ def get_uncommitted_session_files(root: Path) -> Set[Path]:
                 continue
             parts = line.split(maxsplit=1)
             if len(parts) == 2:
-                status, rel_path = parts[0], parts[1]
+                _, rel_path = parts[0], parts[1]
                 if "->" in rel_path:
                     rel_path = rel_path.split("->")[-1].strip()
                 rel_path = rel_path.strip('"')

@@ -149,7 +149,7 @@
       <!-- Hero Section -->
       <section id="hero" class="hero-section">
         <div class="hero-pill">
-          <span>✨ Version 1.1.16 Released &bull; 100% Test Pass Rate (266 Tests)</span>
+          <span>✨ Version 1.1.16 Released &bull; 100% Test Pass Rate (273 Tests)</span>
         </div>
         <h1 class="hero-title">
           The Deterministic Pre-Push Gate for <span class="hero-title-highlight">Modern Python</span>
@@ -206,7 +206,7 @@
         <div class="callout callout-important">
           <div class="callout-icon">🔒</div>
           <div>
-            <b>Local-Only Privacy & Zero-Telemetry Guarantee:</b> DeployProof runs 100% locally on your machine. It makes zero outbound telemetry calls. No source code, test results, credentials, or file paths ever leave your computer. The only optional network call is querying the official PyPI JSON API to verify package existence.
+            <b>Local-Only Privacy & Zero-Telemetry Guarantee:</b> DeployProof runs 100% locally on your machine with zero telemetry. No source code, test results, credentials, or file paths ever leave your computer. The only outbound network requests are read-only queries against the official PyPI registry (to verify newly introduced package existence) and the OSV database (for CVE vulnerability matching, configurable via <code>--no-check-cve</code>).
           </div>
         </div>
 
@@ -798,7 +798,7 @@ generate_tests = "tests/test_deployproof_healed.py"</code></pre></div>
 
         <h3>Does DeployProof make any outbound network requests?</h3>
         <p>
-          DeployProof is 100% local-first and zero-telemetry. No code or results ever leave your machine. The only optional network call is querying the official PyPI JSON API to verify that newly introduced dependencies exist and are not hallucinated by LLMs.
+          DeployProof is 100% local-first and zero-telemetry. No source code or verification results ever leave your machine. The only outbound network requests are read-only HTTP queries to (1) the official PyPI registry to verify package existence and prevent LLM dependency hallucinations, and (2) the open OSV database to detect CVE advisories (which can be disabled via <code>--no-check-cve</code> or offline execution).
         </p>
 
         <h3>How is DeployProof so fast on large projects?</h3>

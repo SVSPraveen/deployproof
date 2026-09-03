@@ -5,7 +5,7 @@ Thank you for your interest in contributing to DeployProof! DeployProof is an op
 ## Core Philosophy & Guardrails
 
 1. **100% Deterministic & Reproducible**: Verification must never rely on non-deterministic LLM calls in the evaluation path. The same code input must yield the exact same mutation and security score across every run.
-2. **Local-First & Zero Telemetry**: DeployProof runs strictly on the developer's local machine and sends no telemetry, source code, test output, or findings to external servers. The only outbound network requests permitted are read-only HTTP GET queries to the official PyPI registry to verify package existence and registration age.
+2. **Local-First & Zero Telemetry**: DeployProof runs strictly on the developer's local machine and sends no telemetry, source code, test output, or findings to external servers. The only outbound network requests permitted are read-only HTTP GET queries to the official PyPI registry (to verify package existence) and the OSV database (for CVE advisories).
 3. **No Breaking Performance Regressions**: Diff-scoped mutation verification (`deployproof check`) must execute in **2 to 5 seconds** for typical 1–3 file changes.
 
 ---

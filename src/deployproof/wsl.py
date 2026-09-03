@@ -1,7 +1,5 @@
 """WSL (Windows Subsystem for Linux) bridge for DeployProof."""
 
-import json
-import os
 import platform
 import subprocess
 from pathlib import Path

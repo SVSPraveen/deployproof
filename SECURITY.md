@@ -28,6 +28,8 @@ DeployProof is dedicated to local-first security and developer safety. If you di
 
 ## Security Guarantees & Scope
 
-* **Local-First Processing**: DeployProof runs strictly on the local machine with zero external telemetry.
-* **Network Boundaries**: Outbound HTTP requests are strictly limited to the official PyPI JSON API (`https://pypi.org/pypi/<pkg>/json`) for package existence and registration timestamp verification.
+* **Local-First Processing**: DeployProof runs strictly on the local machine with zero external telemetry. No source code, credentials, test results, or repository paths are ever sent to external servers.
+* **Network Boundaries**: Outbound network requests are strictly limited to read-only queries against:
+  1. The official **PyPI JSON API** (`https://pypi.org/pypi/<pkg>/json`) to verify package existence and registration age.
+  2. The open **OSV Database** (`https://api.osv.dev/v1/query`) when CVE verification is active (can be disabled via `--no-check-cve` or offline execution).
 * **Sandbox Isolation**: Temporary process sandboxes created during parallel mutation testing (`--workers`) are automatically cleaned up on process termination via signal handlers.

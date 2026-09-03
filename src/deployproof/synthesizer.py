@@ -9,7 +9,7 @@ import ast
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Set
+from typing import Dict, List, Optional, Set
 
 from deployproof.mutator import Mutant
 

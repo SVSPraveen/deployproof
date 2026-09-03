@@ -6,7 +6,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Pattern, Tuple
+from typing import List, Pattern, Tuple
 
 ENV_FILE_NAMES = {
     ".env",
