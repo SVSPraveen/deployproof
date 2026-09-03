@@ -1,8 +1,7 @@
-# DeployProof
+# DeployProof &nbsp;·&nbsp; `pip install deployproof`
 
-### Python CLI tool for pre-push AI-code verification, in-memory AST mutation testing, and self-healing test synthesis.
+**Python CLI** — pre-push AI-code verification, AST mutation testing & self-healing test synthesis. Verifies your code locally in **2–5 seconds** before commit or CI.
 
-> **DeployProof** is an open-source, deterministic pre-push quality and security gate for modern Python codebases. Built to verify AI-generated and human-written code locally in 2–5 seconds before commit or CI.
 
 [![PyPI version](https://img.shields.io/badge/pypi-v1.1.17-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
@@ -80,11 +79,10 @@ Traditional mutation testing tools re-run full test suites against disk-modified
 ## Installation
 
 ```bash
-# Recommended — installs into an isolated environment, exposes the CLI globally
-pipx install deployproof
-
-# Or via pip into your active virtual environment
 pip install deployproof
+
+# Recommended: isolated environment with global CLI access
+pipx install deployproof
 ```
 
 *Requires Python 3.10+.*
