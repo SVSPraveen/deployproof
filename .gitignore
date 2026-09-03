@@ -77,9 +77,11 @@ symbolindex.json
 *.log
 *.cast
 *.gif
+*.mp4
 !assets/*.gif
 !docs/assets/*.gif
 make_gif.py
+make_mp4.py
 
 # Local manual test folders
 Test purpose/

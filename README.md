@@ -76,7 +76,20 @@ pip install deployproof
 pipx install deployproof
 ```
 
-*Requires Python 3.10+.*
+*Requires Python 3.10+ (macOS, Linux, Windows).*
+
+---
+
+## Core Commands
+
+| Command | Action | Impact |
+|---|---|---|
+| `deployproof check` | **Diff Pre-Push Gate** | In-memory AST mutation on modified files in warm RAM |
+| `deployproof check --heal-tests` | **Self-Healing Synthesizer** | Auto-generates ready-to-run pytest cases to kill surviving mutants |
+| `deployproof check --full-repo --workers 8` | **Full Repo Sweep** | Exhaustive whole-codebase scan with parallel worker sandboxes |
+| `deployproof check --wsl` | **Windows WSL Acceleration** | Delegates mutation testing to native Linux kernel for speed |
+| `deployproof init` | **1-Click Pre-Push Hook** | Installs `.git/hooks/pre-push` to guard every push automatically |
+| `deployproof check --json` | **CI / IDE Stream** | Emits clean structured JSON for custom tooling |
 
 ---
 

@@ -15,7 +15,7 @@
   <meta property="og:url" content="https://svspraveen.github.io/deployproof/">
   <meta property="og:title" content="DeployProof — Deterministic Quality & Security Gate for Modern Python">
   <meta property="og:description" content="Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis. Created by SVS Praveen.">
-  <meta property="og:image" content="https://svspraveen.github.io/deployproof/assets/architecture_7_gates.jpg">
+  <meta property="og:image" content="https://raw.githubusercontent.com/SVSPraveen/deployproof/main/assets/demo.gif">
   <meta property="og:site_name" content="DeployProof Documentation">
 
   <!-- Twitter / X -->
@@ -23,7 +23,7 @@
   <meta name="twitter:url" content="https://svspraveen.github.io/deployproof/">
   <meta name="twitter:title" content="DeployProof — Deterministic Quality & Security Gate for Modern Python">
   <meta name="twitter:description" content="Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis.">
-  <meta name="twitter:image" content="https://svspraveen.github.io/deployproof/assets/architecture_7_gates.jpg">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/SVSPraveen/deployproof/main/assets/demo.gif">
 
   <!-- JSON-LD Structured Data for Google / Search Engines -->
   <script type="application/ld+json">
@@ -171,10 +171,9 @@
         </div>
       </section>
 
-      <!-- Architecture Hero Diagram Banner (LangGraph Style) -->
-      <div class="doc-banner-container" style="margin: 2rem 0 3rem 0;">
-        <img src="assets/architecture_7_gates.jpg" alt="DeployProof 7 Verification Gates Architecture Diagram" class="doc-diagram-img" />
-        <div class="diagram-caption">Figure 1: The 7 Verification Gates Pipeline Architecture (Diff-Scoped In-Memory Evaluation)</div>
+      <!-- High-Fidelity Animated Terminal Walkthrough Hero -->
+      <div class="doc-banner-container" style="margin: 2rem 0 3rem 0; border-radius: 12px; overflow: hidden; box-shadow: var(--shadow-lg); border: 1px solid var(--border-color);">
+        <img src="assets/demo.gif" alt="DeployProof In-Memory AST Mutation Testing & Verification Walkthrough" style="width: 100%; display: block; border-radius: 12px;" />
       </div>
 
       <!-- Interactive Terminal Playground -->
@@ -245,9 +244,29 @@
           Line coverage measures what code was <b>executed</b> by your interpreter, not what code was <b>verified</b> by assertions. An automated test can execute 100% of your codebase without asserting a single value, masking critical vulnerabilities.
         </p>
 
-        <div class="doc-banner-container" style="margin: 1.5rem 0 2rem 0;">
-          <img src="assets/terminal_findings.jpg" alt="Real DeployProof Diff Scan Detecting Surviving AST Mutants" class="doc-diagram-img" />
-          <div class="diagram-caption">Figure 2: Real-World Terminal Output — DeployProof Detecting Surviving AST Mutants and Unverified Logic</div>
+        <div class="code-comparison-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin: 1.5rem 0 2rem 0;">
+          <div class="code-box" style="margin: 0; border-color: var(--accent-amber);">
+            <div class="code-header" style="background: rgba(217, 119, 6, 0.1); color: var(--accent-amber); font-weight: 600;">
+              <span>❌ Standard Test (100% Line Coverage - False Confidence)</span>
+            </div>
+            <div class="code-body"><pre><code>def test_calculate_discount():
+    # Only tests the happy path!
+    # Line coverage tool reports 100% green,
+    # but misses boundary and operator regressions.
+    assert calculate_discount(100.0, 0.2) == 80.0</code></pre></div>
+          </div>
+
+          <div class="code-box" style="margin: 0; border-color: var(--accent-emerald);">
+            <div class="code-header" style="background: rgba(5, 150, 105, 0.1); color: var(--accent-emerald); font-weight: 600;">
+              <span>✔ DeployProof AST Mutation (Catches The Bug)</span>
+            </div>
+            <div class="code-body"><pre><code># DeployProof mutates operators in warm RAM:
+# [1] calculator.py:2  if rate > 0.5:  --> if rate > 1.5:
+# [2] calculator.py:3  return price * 0.5 --> return price / 0.5
+# 
+# Result: 3 Surviving Mutants (FAILED - 57.1% Score)
+# Auto-Heal: deployproof check --heal-tests</code></pre></div>
+          </div>
         </div>
 
         <div class="callout callout-warning">
@@ -308,9 +327,18 @@
           <p>
             When a mutant survives your test suite, DeployProof analyzes function signatures, AST types, and boundary conditions to synthesize ready-to-run <code>pytest</code> unit tests automatically with <code>--heal-tests</code>.
           </p>
-          <div class="doc-banner-container" style="margin: 1.5rem 0 2rem 0;">
-            <img src="assets/command_grid.jpg" alt="DeployProof Verification Suite and Parallel Commands" class="doc-diagram-img" />
-            <div class="diagram-caption">Figure 3: Multi-Command Verification Suite — check, --json, --full-repo, and --heal-tests</div>
+          <div class="code-box" style="margin: 1.5rem 0 2rem 0; border-color: var(--accent-primary);">
+            <div class="code-header" style="background: rgba(99, 102, 241, 0.1); color: var(--accent-primary); font-weight: 600;">
+              <span>✨ Synthesized Self-Healing Tests (tests/test_deployproof_healed.py)</span>
+            </div>
+            <div class="code-body"><pre><code># Auto-generated by DeployProof to kill surviving mutants
+def test_kill_calculate_discount_boundary_rate():
+    """Kills mutant: Replace 0.5 with 1.5 on line 2"""
+    assert calculate_discount(100.0, 0.5) == 50.0
+
+def test_kill_calculate_discount_capped_rate():
+    """Kills mutant: Replace binary operator '*' with '/' on line 3"""
+    assert calculate_discount(100.0, 0.8) == 50.0</code></pre></div>
           </div>
         </div>
 
@@ -320,10 +348,28 @@
           <p>
             Inspects AST nodes for high-severity security vulnerabilities including SQL injection, command execution with <code>shell=True</code>, unsafe deserialization (<code>pickle.loads</code>, <code>yaml.load</code> without SafeLoader), SSRF, and hardcoded JWT secrets.
           </p>
+          <div class="code-box">
+            <div class="code-header"><span>Vulnerabilities Caught by Gate 3</span><button class="copy-btn" data-clipboard-text="# 1. SQL Injection via string formatting
+cursor.execute(f'SELECT * FROM users WHERE id = {user_id}')
+
+# 2. Command Injection via shell=True
+subprocess.Popen(f'ping {host}', shell=True)
+
+# 3. Insecure Deserialization (Remote Code Execution)
+data = pickle.loads(untrusted_payload)">Copy</button></div>
+            <div class="code-body"><pre><code># 1. SQL Injection via string formatting
+cursor.execute(f"SELECT * FROM users WHERE id = {user_id}")  # BLOCKED: Formatted SQL execution
+
+# 2. Command Injection via shell=True
+subprocess.Popen(f"ping {host}", shell=True)                 # BLOCKED: shell=True execution
+
+# 3. Insecure Deserialization (Remote Code Execution)
+data = pickle.loads(untrusted_payload)                       # BLOCKED: Unsafe pickle deserialization</code></pre></div>
+          </div>
           <div class="callout callout-note">
             <div class="callout-icon">🛡️</div>
             <div>
-              <b>Zero Noise:</b> Scans only newly modified lines in your git diff. Does not complain about legacy code unless touched in the active PR.
+              <b>Zero Noise Guarantee:</b> Scans only newly modified lines in your git diff. Does not complain about existing legacy code unless modified in the current branch.
             </div>
           </div>
         </div>
@@ -332,23 +378,48 @@
         <div id="gate-4" style="margin-bottom: 2.5rem;">
           <h3>Gate 4: Secrets & 50-Commit Git History Scanner</h3>
           <p>
-            Combines verified regex patterns for OpenAI, Anthropic, AWS, GitHub, Stripe, and Slack API keys with Shannon entropy analysis ($\text{Entropy} \ge 3.8$) across both the working tree and the past 50 commits.
+            Combines verified regex patterns for OpenAI, Anthropic, AWS, GitHub, Stripe, and Slack API keys with Shannon entropy analysis ($\text{Entropy} \ge 3.8$) across both the working tree and the past 50 commits (<code>git log -p</code>).
           </p>
+          <div class="code-box">
+            <div class="code-header"><span>Credential Detection & Entropy Engine</span><button class="copy-btn" data-clipboard-text="# Verified Pattern Signatures:
+# OpenAI:     sk-proj-xxxxxxxxxxxxxxxxxxxx
+# Anthropic:  sk-ant-xxxxxxxxxxxxxxxxxxxx
+# GitHub:     ghp_xxxxxxxxxxxxxxxxxxxx
+# Stripe:     sk_live_xxxxxxxxxxxxxxxxxxxx
+# AWS:        AKIAIOSFODNN7EXAMPLE">Copy</button></div>
+            <div class="code-body"><pre><code># Verified Pattern Signatures Caught in Diff & Git History:
+OPENAI_KEY    = "sk-proj-abc1234567890..."      # BLOCKED: OpenAI API Key pattern
+GITHUB_TOKEN  = "ghp_1234567890abcdef..."       # BLOCKED: GitHub Personal Access Token
+AWS_KEY       = "AKIAIOSFODNN7EXAMPLE"          # BLOCKED: AWS Access Key ID
+HIGH_ENTROPY  = "a8f9c2d1e0b345f879102938a1..." # BLOCKED: Shannon Entropy >= 3.8</code></pre></div>
+          </div>
         </div>
 
         <!-- Gate 5 -->
         <div id="gate-5" style="margin-bottom: 2.5rem;">
           <h3>Gate 5: Dependency CVE & Slopsquatting Defense</h3>
           <p>
-            Cross-references dependencies against the OSV vulnerability database and queries the PyPI JSON API to detect hallucinated LLM package names and packages registered within the last 30 days.
+            Cross-references dependencies against the OSV vulnerability database and queries the PyPI JSON API to detect hallucinated LLM package names and packages registered within the last 30 days (slopsquatting / typosquatting).
           </p>
+          <div class="code-box">
+            <div class="code-header"><span>PyPI Registry Verification & OSV CVE Matching</span><button class="copy-btn" data-clipboard-text="dependencies = [
+    'langchain-super-tools',  # BLOCKED: Package does not exist on PyPI (Hallucinated package)
+    'fastapi-auth-quick',     # WARNING: Registered on PyPI < 30 days ago (Slopsquatting risk)
+    'urllib3==1.26.4',        # BLOCKED: CVE-2021-33503 High severity vulnerability detected
+]">Copy</button></div>
+            <div class="code-body"><pre><code>dependencies = [
+    "langchain-super-tools",  # BLOCKED: Does not exist on PyPI (Hallucinated by LLM)
+    "fastapi-auth-quick",     # WARNING: Registered on PyPI &lt; 30 days ago (Slopsquatting risk)
+    "urllib3==1.26.4",        # BLOCKED: CVE-2021-33503 High severity vulnerability detected
+]</code></pre></div>
+          </div>
         </div>
 
         <!-- Gate 6 -->
         <div id="gate-6" style="margin-bottom: 2.5rem;">
           <h3>Gate 6: CWE-61 Symlink Sandbox Escape Gate</h3>
           <p>
-            Resolves all symbolic links and flags any target that traverses outside the repository root, neutralizing sandbox traversal tricks (e.g. GhostApproval disclosure).
+            Resolves all symbolic links and flags any target that traverses outside the repository root boundary, neutralizing sandbox traversal tricks and confidential data disclosure (GhostApproval).
           </p>
         </div>
 
@@ -358,6 +429,16 @@
           <p>
             Detects blanket <code>except Exception: pass</code> anti-patterns, dead code after unconditional returns, and mock leakages that mask broken production implementations.
           </p>
+          <div class="code-box">
+            <div class="code-header"><span>Swallowed Exception & Dead Code Heuristics</span><button class="copy-btn" data-clipboard-text="try:
+    process_payment(order)
+except:
+    pass # BLOCKED: Swallowed bare exception masks production crashes">Copy</button></div>
+            <div class="code-body"><pre><code>try:
+    process_payment(order)
+except:
+    pass  # BLOCKED: Bare swallowed exception completely silences critical runtime errors!</code></pre></div>
+          </div>
         </div>
       </section>
 
@@ -390,10 +471,6 @@ deployproof check</code></pre></div>
 deployproof init</code></pre></div>
         </div>
 
-        <div class="doc-banner-container" style="margin: 2rem 0;">
-          <img src="assets/demo.gif" alt="DeployProof Terminal Verification Walkthrough" class="doc-diagram-img" />
-          <div class="diagram-caption">Live Walkthrough: DeployProof catching surviving AST mutants and synthesizing self-healing pytest unit tests</div>
-        </div>
       </section>
 
       <!-- Workflows: Interactive Mode -->
@@ -823,9 +900,20 @@ deployproof check --files src/app.py --wsl</code></pre>
           </tbody>
         </table>
 
-        <div class="doc-banner-container" style="margin: 1.5rem 0 2rem 0;">
-          <img src="assets/terminal_perfect.jpg" alt="DeployProof 100% Pre-Push Verification Certification" class="doc-diagram-img" />
-          <div class="diagram-caption">Figure 4: DeployProof 100% Pre-Push Verification Gate Certification (All 7 Gates Passed)</div>
+        <div class="feature-card" style="margin: 1.5rem 0 2rem 0; border: 1px solid var(--accent-emerald); background: rgba(5, 150, 105, 0.05); padding: 1.5rem; border-radius: var(--radius-lg);">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+            <div>
+              <div style="font-size: 1.25rem; font-weight: 700; color: var(--accent-emerald); display: flex; align-items: center; gap: 0.5rem;">
+                <span>🛡️ DeployProof Verification Certification</span>
+              </div>
+              <p style="margin: 0.5rem 0 0 0; color: var(--text-secondary); font-size: 0.95rem;">
+                Deterministic pre-push gate passed: 100% AST mutation score (all generated mutants caught by test suite), zero leaked secrets, zero OWASP SAST vulnerabilities, clean dependency registry verification.
+              </p>
+            </div>
+            <div style="background: var(--accent-emerald); color: white; padding: 0.5rem 1.25rem; border-radius: var(--radius-md); font-weight: 700; font-size: 1.1rem; text-align: center;">
+              100% PASSED
+            </div>
+          </div>
         </div>
       </section>
 
