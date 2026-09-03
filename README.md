@@ -26,8 +26,9 @@
 - [How It Compares: DeployProof vs. Mutmut vs. Cosmic Ray](#how-it-compares)
 - [Installation](#installation)
 - [Quickstart & Walkthrough](#quickstart--walkthrough)
-- [How It Works (Diff-Scoped vs. Full Repo)](#how-it-works)
+- [How It Works (Diff-Scoped, Full Repo, & WSL)](#how-it-works)
 - [The 7 Verification Gates](#the-7-verification-gates)
+- [Windows WSL Delegation](#3-windows-wsl-delegation-deployproof-check---wsl--native-linux-speed-on-windows)
 - [Architecture & Design Rationale (`DECISIONS.md`)](#architecture--design-rationale)
 - [CI/CD & Pre-Commit Integration](#cicd--pre-commit-integration)
 - [Configuration (`pyproject.toml`)](#configuration-pyprojecttoml)
@@ -189,6 +190,18 @@ Evaluates **every tracked Python file across the entire repository**, paralleliz
 # Full repository audit distributed across isolated parallel worker sandboxes
 deployproof check --full-repo --workers 8
 ```
+
+### 3. Windows WSL Delegation (`deployproof check --wsl`) — *Native Linux Speed on Windows*
+On Windows, full mutation testing tools traditionally require POSIX process forking. DeployProof provides a seamless bridge via the `--wsl` flag that translates paths (safely quoting spaces), delegates mutation runs to `mutmut` inside a native Linux environment inside Windows Subsystem for Linux (WSL), and streams verified results back to your Windows console:
+
+```bash
+# Windows: delegate mutation test verification to native Linux mutmut in WSL
+deployproof check --wsl
+```
+
+> ⚙️ **One-Time WSL Setup**: Configure mutmut in WSL by running:  
+> `wsl bash -c "python3 -m venv ~/.deployproof-wsl-venv && ~/.deployproof-wsl-venv/bin/pip install mutmut pytest"`  
+> *(If WSL or the Linux venv is not configured, DeployProof automatically falls back to the native in-memory engine with a helpful notice).*
 
 > 📊 **Hardware & Sizing Details**: For benchmark timing matrices across open-source codebases, per-worker RAM footprints, and hardware tuning formulas, see the **[Interactive Sizing & Architecture Guide](https://svspraveen.github.io/deployproof/)**.
 

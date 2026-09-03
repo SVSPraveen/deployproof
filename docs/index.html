@@ -137,6 +137,7 @@
         <div class="sidebar-heading">Reference & Architecture</div>
         <ul class="sidebar-menu">
           <li class="sidebar-item"><a href="#cli-reference" class="sidebar-link">📋 CLI Flags Reference</a></li>
+          <li class="sidebar-item"><a href="#wsl" class="sidebar-link">🐧 Windows WSL Bridge</a></li>
           <li class="sidebar-item"><a href="#architecture" class="sidebar-link">🏛️ Architecture & Benchmarks</a></li>
           <li class="sidebar-item"><a href="#faq" class="sidebar-link">❓ FAQ & Troubleshooting</a></li>
         </ul>
@@ -740,6 +741,37 @@ generate_tests = "tests/test_deployproof_healed.py"</code></pre></div>
             </tr>
           </tbody>
         </table>
+      </section>
+
+      <!-- Windows WSL Delegation -->
+      <section id="wsl" class="doc-section">
+        <h2>Windows Subsystem for Linux (WSL) Delegation</h2>
+        <p>
+          On Windows host machines, full-scale mutation testing tools (like <code>mutmut</code>) rely heavily on POSIX process forking. DeployProof provides a high-performance <b>WSL bridge</b> via the <code>--wsl</code> flag:
+        </p>
+        
+        <div class="callout callout-info" style="margin: 1.5rem 0;">
+          <div class="callout-title">💡 How WSL Delegation Works</div>
+          <div class="callout-body">
+            1. <b>Automatic Path Translation:</b> Automatically converts Windows absolute paths (including paths with spaces like <code>C:\Users\John Doe\...</code>) into POSIX mount paths (<code>/mnt/c/Users/John\ Doe/...</code>) using safe argument quoting.<br />
+            2. <b>Native POSIX Forking:</b> Executes <code>mutmut</code> inside a native Linux virtual environment (<code>~/.deployproof-wsl-venv</code>) inside WSL.<br />
+            3. <b>Seamless Console Streaming:</b> Streams live mutation results, killed counts, and failure diagnostics back to your Windows PowerShell or Command Prompt terminal.
+          </div>
+        </div>
+
+        <h3 style="margin-top: 1.5rem; color: var(--accent);">One-Time WSL Setup</h3>
+        <p>To configure your Linux WSL environment with mutmut and pytest, run the following command once from Windows PowerShell:</p>
+        <pre><code class="language-bash">wsl bash -c "python3 -m venv ~/.deployproof-wsl-venv && ~/.deployproof-wsl-venv/bin/pip install mutmut pytest"</code></pre>
+
+        <h3 style="margin-top: 1.5rem; color: var(--accent);">Running DeployProof with WSL</h3>
+        <pre><code class="language-bash"># Run DeployProof on Windows delegating mutation execution to WSL
+deployproof check --wsl
+
+# Target specific files with WSL delegation
+deployproof check --files src/app.py --wsl</code></pre>
+        <p style="margin-top: 1rem; color: var(--text-muted); font-size: 0.9rem;">
+          <i>Note: If WSL or the Linux venv is not configured, DeployProof automatically detects this and gracefully falls back to the native in-memory AST engine without failing.</i>
+        </p>
       </section>
 
       <!-- Architecture & Benchmarks -->
