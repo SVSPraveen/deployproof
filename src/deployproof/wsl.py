@@ -1,6 +1,7 @@
 """WSL (Windows Subsystem for Linux) bridge for DeployProof."""
 
 import platform
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -59,8 +60,9 @@ def is_wsl_venv_configured(venv_path: str = DEFAULT_WSL_VENV) -> bool:
     if not is_windows():
         return False
     try:
+        quoted_target = shlex.quote(f"{venv_path}/bin/mutmut")
         res = subprocess.run(
-            ["wsl", "bash", "-c", f"test -f {venv_path}/bin/mutmut"],
+            ["wsl", "bash", "-c", f"test -f {quoted_target}"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -122,7 +124,9 @@ def run_wsl_mutmut(
         except ValueError:
             pass
 
-    cmd_script = f"source {venv_path}/bin/activate && cd {wsl_root} && mutmut run"
+    quoted_act = shlex.quote(f"{venv_path}/bin/activate")
+    quoted_dir = shlex.quote(wsl_root)
+    cmd_script = f"source {quoted_act} && cd {quoted_dir} && mutmut run"
     try:
         res = subprocess.run(
             ["wsl", "bash", "-c", cmd_script],

@@ -244,10 +244,17 @@ def handle_check(args: argparse.Namespace) -> int:
 
     try:
         if args.files:
-            session_files = [
-                (cwd / f).absolute() if not Path(f).is_absolute() else Path(f)
-                for f in args.files
-            ]
+            missing_files = []
+            session_files = []
+            for f in args.files:
+                p = (cwd / f).resolve() if not Path(f).is_absolute() else Path(f).resolve()
+                if not p.exists():
+                    missing_files.append(f)
+                else:
+                    session_files.append(p)
+            if missing_files:
+                print(f"Error: Target file(s) specified in --files do not exist: {', '.join(missing_files)}", file=sys.stderr)
+                return 1
             if session_files:
                 try:
                     repo_root = get_git_root(session_files[0].parent)
@@ -277,6 +284,16 @@ def handle_check(args: argparse.Namespace) -> int:
     except DiffScopeError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
+
+    if getattr(args, "tests", None):
+        missing_tests = []
+        for t in args.tests:
+            tp = (cwd / t).resolve() if not Path(t).is_absolute() else Path(t).resolve()
+            if not tp.exists():
+                missing_tests.append(t)
+        if missing_tests:
+            print(f"Error: Test file(s) specified in --tests do not exist: {', '.join(missing_tests)}", file=sys.stderr)
+            return 1
 
     cfg = load_repo_config(repo_root or cwd)
     threshold = args.threshold if args.threshold is not None else float(cfg.get("threshold", 80.0))

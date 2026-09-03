@@ -2362,8 +2362,32 @@ def _run_mutation_tests_sequential(
     file_switch_map: Dict[Path, Dict[str, int]] = {}
     all_skipped: List[SkippedConstruct] = []
     all_pruned_equivalent: List[PrunedEquivalentMutant] = []
-    total_mutants_count = 0
+    syntax_errors: List[str] = []
+    for f in target_files:
+        if f.is_file() and f.suffix == '.py':
+            try:
+                src = f.read_text(encoding='utf-8', errors='replace')
+                ast.parse(src, filename=str(f))
+            except SyntaxError as e:
+                syntax_errors.append(f"{f.name}:{getattr(e, 'lineno', 1)}: {e.msg if hasattr(e, 'msg') else e}")
 
+    if syntax_errors:
+        err_msg = "SyntaxError detected in target scope:\n  * " + "\n  * ".join(syntax_errors)
+        return MutationResult(
+            total_mutants=0,
+            killed_mutants=0,
+            survived_mutants=[],
+            untested_files=target_files,
+            runner_errors=[],
+            skipped_constructs=[],
+            pruned_equivalent_mutants=[],
+            mutation_score=None,
+            duration_seconds=round(time.time() - start_time, 2),
+            files_tested=target_files,
+            collection_error=err_msg,
+        )
+
+    total_mutants_count = 0
     for f in target_files:
         if f.is_file() and f.suffix == '.py':
             line_ranges = None
@@ -2750,8 +2774,33 @@ def run_mutation_tests_parallel(
     file_switch_map: Dict[Path, Dict[str, int]] = {}
     all_skipped: List[SkippedConstruct] = []
     all_pruned_equivalent: List[PrunedEquivalentMutant] = []
-    total_mutants_count = 0
+    # 2. Check for SyntaxErrors in target scope (fail closed)
+    syntax_errors: List[str] = []
+    for f in target_files:
+        if f.is_file() and f.suffix == '.py':
+            try:
+                src = f.read_text(encoding='utf-8', errors='replace')
+                ast.parse(src, filename=str(f))
+            except SyntaxError as e:
+                syntax_errors.append(f"{f.name}:{getattr(e, 'lineno', 1)}: {e.msg if hasattr(e, 'msg') else e}")
 
+    if syntax_errors:
+        err_msg = "SyntaxError detected in target scope:\n  * " + "\n  * ".join(syntax_errors)
+        return MutationResult(
+            total_mutants=0,
+            killed_mutants=0,
+            survived_mutants=[],
+            untested_files=target_files,
+            runner_errors=[],
+            skipped_constructs=[],
+            pruned_equivalent_mutants=[],
+            mutation_score=None,
+            duration_seconds=round(time.time() - start_time, 2),
+            files_tested=target_files,
+            collection_error=err_msg,
+        )
+
+    total_mutants_count = 0
     for f in target_files:
         if f.is_file() and f.suffix == '.py':
             line_ranges = None

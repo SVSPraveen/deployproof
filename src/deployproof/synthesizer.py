@@ -166,11 +166,11 @@ class TestSynthesizer:
         defaults_map: Dict[str, str] = {}
         if num_defaults > 0:
             default_names = [a.arg for a in (posonly_nodes + regular_nodes)[-num_defaults:]]
-            for name, d_expr in zip(default_names, func_node.args.defaults):
+            for name, d_expr in zip(default_names, func_node.args.defaults, strict=True):
                 defaults_map[name] = ast.unparse(d_expr)
 
         kw_defaults_list = getattr(func_node.args, "kw_defaults", [])
-        for k_node, d_expr in zip(kwonly_nodes, kw_defaults_list):
+        for k_node, d_expr in zip(kwonly_nodes, kw_defaults_list, strict=True):
             if d_expr:
                 defaults_map[k_node.arg] = ast.unparse(d_expr)
 

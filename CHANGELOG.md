@@ -8,13 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.1.17] - 2026-09-03
 
 ### Added
-- **Comprehensive WSL Test Suite**: Added 100% branch and edge-case unit tests for `wsl.py`, boosting `wsl.py` mutation score to 96.8% and expanding total test count to **273 tests** (100% passing).
+- **Comprehensive WSL Test Suite**: Added 100% branch and edge-case unit tests for `wsl.py`, boosting `wsl.py` mutation score to 96.8% and expanding total test count to **277 tests** (100% passing).
 - **Embedded Architecture Hero Asset**: Added visual hero diagram to the top of `README.md`.
 - **Restored Reverse Dependency Investigation**: Restored `INVESTIGATION_blastradius.md` to repository tracking, linking with `FUTURE_SCOPE.md`.
 
 ### Fixed
+- **WSL Path Quoting with Spaces**: Wrapped all interpolated WSL paths in `shlex.quote()` to prevent bash word-splitting on standard Windows user profiles with spaces (e.g. `C:\Users\John Doe\Projects`).
+- **Fail-Closed Verification Gates**: Enforced strict fail-closed behavior on invalid inputs:
+  - Non-existent files passed to `--files` or `--tests` immediately exit with code `1` and descriptive stderr diagnostics.
+  - Python files with `SyntaxError` are flagged with CRITICAL severity (`DP-SAST-000`) and halt mutation checks as unparsable collection errors (exit code `2`/`1`).
 - **Transparent Privacy & Network Documentation**: Accurately documented read-only queries to both the official PyPI registry (package existence verification) and the OSV database (CVE advisories) across `README.md`, `SECURITY.md`, `CONTRIBUTING.md`, and the product portal.
-- **Linter & Typing Cleanups**: Cleaned up unused variables and unused imports across `reporter.py`, `secrets.py`, `synthesizer.py`, `wsl.py`, `mutator.py`, and `diff.py`.
+- **Linter & Typing Cleanups**: Cleaned up unused variables and unused imports across `reporter.py`, `secrets.py`, `synthesizer.py`, `wsl.py`, `mutator.py`, and `diff.py`. Tightened `zip()` calls in `synthesizer.py` with `strict=True`.
 
 ## [1.1.16] - 2026-09-03
 

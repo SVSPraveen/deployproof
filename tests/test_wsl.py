@@ -124,7 +124,7 @@ def test_is_wsl_venv_configured_branches():
         mock_run.return_value.returncode = 0
         assert is_wsl_venv_configured("~/.my-venv") is True
         mock_run.assert_called_once_with(
-            ["wsl", "bash", "-c", "test -f ~/.my-venv/bin/mutmut"],
+            ["wsl", "bash", "-c", "test -f '~/.my-venv/bin/mutmut'"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -223,7 +223,7 @@ def test_run_wsl_mutmut_success_and_failures(tmp_path: Path):
         assert res["stdout"] == "mutmut complete: 10 killed"
         assert res["returncode"] == 0
         mock_run.assert_called_once_with(
-            ["wsl", "bash", "-c", "source ~/.custom-venv/bin/activate && cd /mnt/c/myrepo && mutmut run"],
+            ["wsl", "bash", "-c", "source '~/.custom-venv/bin/activate' && cd /mnt/c/myrepo && mutmut run"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -279,4 +279,32 @@ def test_get_wsl_path_translation():
         
         p = get_wsl_path(Path("C:/project"))
         assert p == "/mnt/c/project"
+
+
+def test_wsl_paths_with_spaces(tmp_path: Path):
+    """Verify WSL execution handles paths with spaces properly via shlex quoting."""
+    space_path = "/mnt/c/Users/John Doe/OneDrive - Corp/my project"
+    f = tmp_path / "app.py"
+    
+    with patch("deployproof.wsl.get_wsl_path", return_value=space_path), \
+         patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "mutmut complete"
+        mock_run.return_value.stderr = ""
+
+        res = run_wsl_mutmut(tmp_path, [f], venv_path="/home/user/my venv")
+        assert res["success"] is True
+        
+        # Verify shlex quoting is present in bash command
+        expected_cmd = "source '/home/user/my venv/bin/activate' && cd '/mnt/c/Users/John Doe/OneDrive - Corp/my project' && mutmut run"
+        mock_run.assert_called_once_with(
+            ["wsl", "bash", "-c", expected_cmd],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120.0,
+            check=False,
+        )
+
 

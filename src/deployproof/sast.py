@@ -416,6 +416,20 @@ def scan_file_for_sast(file_path: Path) -> List[SastFinding]:
         visitor = SastAstVisitor(file_path, lines)
         visitor.visit(tree)
         return visitor.findings
+    except SyntaxError as e:
+        return [
+            SastFinding(
+                file_path=file_path,
+                line_number=getattr(e, "lineno", 1) or 1,
+                rule_id="DP-SAST-000",
+                rule_name="Syntax Error / Unparsable Python Source",
+                severity="CRITICAL",
+                snippet=getattr(e, "text", "") or str(e),
+                description=f"Python source cannot be parsed due to SyntaxError: {e.msg if hasattr(e, 'msg') else e}",
+                cwe="CWE-754",
+                owasp_category="A08:2021-Software and Data Integrity Failures",
+            )
+        ]
     except Exception:
         return []
 

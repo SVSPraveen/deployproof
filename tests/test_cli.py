@@ -291,4 +291,37 @@ def test_auto_save_report_file(tmp_path: Path, capsys, monkeypatch):
     assert "DeployProof - LOCAL PRE-CHECK" in custom_out.read_text(encoding="utf-8")
 
 
+def test_fail_closed_on_non_existent_files(capsys, tmp_path, monkeypatch):
+    """Verify check fails closed (exit code 1) when specified --files do not exist."""
+    monkeypatch.chdir(tmp_path)
+    exit_code = main(["check", "--files", "does_not_exist_file.py"])
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Error: Target file(s) specified in --files do not exist" in captured.err
+
+
+def test_fail_closed_on_non_existent_tests(capsys, tmp_path, monkeypatch):
+    """Verify check fails closed (exit code 1) when specified --tests do not exist."""
+    monkeypatch.chdir(tmp_path)
+    src = tmp_path / "real_file.py"
+    src.write_text("def ok(): return 1\n", encoding="utf-8")
+    exit_code = main(["check", "--files", str(src), "--tests", "missing_test.py"])
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "Error: Test file(s) specified in --tests do not exist" in captured.err
+
+
+def test_fail_closed_on_syntax_error_file(capsys, tmp_path, monkeypatch):
+    """Verify check fails closed when a target Python file has a syntax error."""
+    monkeypatch.chdir(tmp_path)
+    broken_src = tmp_path / "broken.py"
+    broken_src.write_text("def broken(:\n    pass\n", encoding="utf-8")
+    
+    exit_code = main(["check", "--files", str(broken_src)])
+    assert exit_code != 0
+    captured = capsys.readouterr()
+    assert "Syntax Error" in captured.out or "SyntaxError" in captured.out
+
+
+
 
