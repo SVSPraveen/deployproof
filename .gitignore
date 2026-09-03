@@ -78,6 +78,7 @@ symbolindex.json
 *.cast
 *.gif
 !assets/*.gif
+!docs/assets/*.gif
 make_gif.py
 
 # Local manual test folders
