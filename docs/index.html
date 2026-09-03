@@ -713,7 +713,16 @@ generate_tests = "tests/test_deployproof_healed.py"</code></pre></div>
               <th>Default</th>
             </tr>
           </thead>
-          <tbody>
+            <tr>
+              <td><code>-o, --output PATH</code></td>
+              <td>Custom destination file path to save the full verification report. Automatically defaults to <code>.deployproof/report.txt</code>.</td>
+              <td><code>.deployproof/report.txt</code></td>
+            </tr>
+            <tr>
+              <td><code>--suggest-tests</code></td>
+              <td>Print auto-synthesized test suggestions inline for surviving mutants in terminal report.</td>
+              <td>Disabled (concise terminal)</td>
+            </tr>
             <tr>
               <td><code>--json</code></td>
               <td>Output structured machine-readable JSON containing all findings across all 7 verification gates.</td>
