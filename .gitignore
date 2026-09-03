@@ -93,3 +93,5 @@ GROWTH_SCOPE.md
 scripts/
 mutants/
 full_scan_report.txt
+demo/
+run_demo.ps1
