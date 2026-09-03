@@ -214,7 +214,7 @@
         <div class="cards-grid">
           <div class="feature-card">
             <div class="card-icon">⚡</div>
-            <div class="card-title">2 to 5 Second Diff Speed</div>
+            <div class="card-title">Fast Diff-Scoped Execution</div>
             <div class="card-desc">Scopes AST mutations strictly to modified lines in your git diff, running in milliseconds in your terminal.</div>
           </div>
 
@@ -379,7 +379,7 @@ pip install deployproof</code></pre></div>
         <h3>2. Run Verification on Staged Changes</h3>
         <div class="code-box">
           <div class="code-header"><span>BASH</span><button class="copy-btn" data-clipboard-text="deployproof check">Copy</button></div>
-          <div class="code-body"><pre><code># Verifies modified files in git diff (completes in 2-5 seconds)
+          <div class="code-body"><pre><code># Verifies modified files in git diff (significantly faster than full-sweep tools)
 deployproof check</code></pre></div>
         </div>
 
@@ -778,7 +778,7 @@ deployproof check --files src/app.py --wsl</code></pre>
       <section id="architecture" class="doc-section">
         <h2>Architecture & Benchmarks</h2>
         <p>
-          Traditional mutation testing tools (like <code>mutmut</code> or <code>Cosmic Ray</code>) take <b>8+ hours</b> to evaluate large codebases on Windows because of NTFS disk write bottlenecks. DeployProof's <b>in-memory schemata engine</b> compiles all mutants into warm RAM, achieving a <b>10x speedup</b>.
+          Traditional mutation testing tools (like <code>mutmut</code> or <code>Cosmic Ray</code>) rewrite source files to disk for every mutant and run the full test suite each time — a process that gets slower as the codebase grows. DeployProof's <b>in-memory schemata engine</b> compiles all mutants into a single conditional AST in warm RAM, avoiding disk I/O entirely and scaling with the size of your <em>diff</em> rather than your entire repo.
         </p>
 
         <table class="doc-table">

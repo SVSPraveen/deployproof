@@ -62,7 +62,7 @@ Traditional mutation testing tools re-run full test suites against disk-modified
 
 | Feature / Capability | DeployProof | mutmut | Cosmic Ray |
 |---|:---:|:---:|:---:|
-| **Git Diff Speed (Pre-Commit)** | **2 – 5 Seconds** *(Diff-Scoped + Fail-Fast)* | Hours (Full sweeps) | Hours (Full sweeps) |
+| **Git Diff Speed (Pre-Commit)** | **Significantly faster** *(Diff-Scoped, in-memory, fail-fast)* | Slow (rewrites files, full sweeps) | Slow (rewrites files, full sweeps) |
 | **Mutation Engine** | **In-Memory AST Schemata** | File rewrite to disk | AST disk rewriting |
 | **Self-Healing Test Synthesis** | **Yes (`--heal-tests` / `-i`)** | No | No |
 | **Async / Await Dropping** | **Yes** | No | No |
@@ -173,10 +173,10 @@ Pre-check clean: 100% of tested basic mutations caught.
 DeployProof provides two distinct, optimized execution modes:
 
 ### 1. Diff-Scoped Pre-Push Gate (`deployproof check`) — *Default Fast Mode*
-Evaluates **only the files modified in your active session or git diff** (1–3 files typically). Because only newly edited AST nodes are mutated in memory, it runs in **2 to 5 seconds** in local developer loops, pre-commit hooks, and pre-push gates.
+Evaluates **only the files modified in your active session or git diff** (1–3 files typically). Because only newly edited AST nodes are mutated in warm RAM — no disk writes, no file copies — this mode is **significantly faster** than traditional mutation tools and completes well before your attention switches context.
 
 ```bash
-# Fast check: verifies modified files in your current git diff (2-5s)
+# Fast check: verifies modified files in your current git diff
 deployproof check
 
 # Output structured JSON for IDE tooling or custom pipelines
