@@ -6,7 +6,7 @@
 pip install deployproof
 ```
 
-[![PyPI version](https://img.shields.io/badge/pypi-v1.1.17-007ec6.svg)](https://pypi.org/project/deployproof/)
+[![PyPI version](https://img.shields.io/badge/pypi-v1.1.18-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
 [![CI](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml/badge.svg)](https://github.com/SVSPraveen/deployproof/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/tests-278%20passed-2ea44f.svg)](https://github.com/SVSPraveen/deployproof)
@@ -259,7 +259,7 @@ jobs:
 ```yaml
 repos:
   - repo: https://github.com/SVSPraveen/deployproof
-    rev: v1.1.17
+    rev: v1.1.18
     hooks:
       - id: deployproof-check
 ```

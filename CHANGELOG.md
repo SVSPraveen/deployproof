@@ -5,6 +5,16 @@ All notable changes to DeployProof will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.18] - 2026-09-03
+
+### Added
+- **Animated Terminal Walkthrough GIF**: Added high-fidelity virtual terminal recording (`assets/demo.gif`) showcasing diff-scoped pre-push mutation verification, surviving mutant detection, self-healing test synthesis, and clean JSON streaming across `README.md`, PyPI, and the documentation portal.
+
+### Changed
+- **Documentation Restructuring**: Re-aligned `README.md` and product docs to clearly highlight in-memory AST mutation testing as the core engine, positioning SAST, secrets scanning, dependency verification, and symlink defenses as comprehensive companion security gates.
+- **Enhanced PyPI & Search Engine SEO**: Optimized package metadata, titles, keywords, and description for Google indexing and PyPI search visibility.
+- **Removed Fabricated Timing Estimates**: Replaced estimated timing multipliers with honest relative mechanism comparisons (in-memory AST schemata vs disk rewrites).
+
 ## [1.1.17] - 2026-09-03
 
 ### Added

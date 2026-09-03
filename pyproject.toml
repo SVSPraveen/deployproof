@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deployproof"
-version = "1.1.17"
+version = "1.1.18"
 description = "DeployProof (Python CLI) — AI-code verification, in-memory AST mutation testing, secrets scanning & self-healing test synthesis for Python by SVS Praveen."
 readme = "README.md"
 requires-python = ">=3.10"
