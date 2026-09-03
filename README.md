@@ -1,6 +1,8 @@
 # DeployProof
 
-> Deterministic pre-push quality & security gate for modern Python codebases: In-memory AST mutation testing, credential scanning, and self-healing test synthesis. Built for human engineering teams and AI-assisted workflows alike.
+### Python CLI tool for pre-push AI-code verification, in-memory AST mutation testing, and self-healing test synthesis.
+
+> **DeployProof** is an open-source, deterministic pre-push quality and security gate for modern Python codebases. Built to verify AI-generated and human-written code locally in 2–5 seconds before commit or CI.
 
 [![PyPI version](https://img.shields.io/badge/pypi-v1.1.17-007ec6.svg)](https://pypi.org/project/deployproof/)
 [![Python versions](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-3776ab.svg)](https://pypi.org/project/deployproof/)
