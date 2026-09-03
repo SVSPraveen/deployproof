@@ -77,11 +77,14 @@ symbolindex.json
 *.log
 *.cast
 *.gif
+!assets/*.gif
+make_gif.py
 
 # Local manual test folders
 Test purpose/
-deployproof-demo.*
-demo.*
+/demo.*
+/deployproof-demo.*
+!assets/demo.gif
 
 # Local blog drafts & internal maintainer scratchpads
 DEVTO_POST.md

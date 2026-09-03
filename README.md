@@ -83,7 +83,7 @@ pipx install deployproof
 ## Quickstart & Walkthrough
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/SVSPraveen/deployproof/main/assets/deployproof-terminal-showcase.jpg" alt="DeployProof Terminal Verification Showcase" width="100%">
+  <img src="https://raw.githubusercontent.com/SVSPraveen/deployproof/main/assets/demo.gif" alt="DeployProof Terminal Verification Walkthrough" width="100%">
 </p>
 
 ### The Problem in Action
